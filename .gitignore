@@ -12,8 +12,12 @@ node_modules/
 dist/
 *.log
 npm-debug.log*
+*.tsbuildinfo
 
 # Editor / OS
 .DS_Store
 .vscode/
 .idea/
+
+# Playwright smoke-test artifacts
+.playwright-mcp/

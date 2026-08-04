@@ -74,6 +74,49 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
 - **`src/agent/`** — the LLM decision layer. Receives position snapshot, returns a structured
   decision `{ action: "repay"|"supply", token, amount, reasoning }`, then calls KeeperHub to execute.
 - **`scripts/`** — setup & verification: first-tx dry-run, health checks, sizing tests, workflow deploy.
+- **`server/` + `web/`** — the hosted face: an observer dashboard **and** a Telegram bot, in one
+  node process (port 8787). `server/` holds each user's KeeperHub key **encrypted at rest**
+  (AES-256-GCM) in a Redis-backed store (`server/store.ts`), keyed by an HttpOnly cookie for the web
+  session and by verified Telegram user id for the bot. `web/` (Vite + React) is a pure viewer that
+  proxies `/api` to it and doubles as the Telegram Mini App. The browser/chat never sees the key and
+  never connects or signs a wallet. Execution stays entirely on the KeeperHub side, exactly as the CLI
+  path.
+
+## Telegram bot + Mini App (the phone-native face)
+
+Real DeFi users live on their phones, and a liquidation guardian's value is in *pushing* the instant
+health factor drops. The bot (`server/bot.ts`) closes that last mile:
+
+```
+Telegram ──Mini App (web form + initData)──▶ POST /api/session ──▶ verify initData
+   ▲                                                              ├▶ validate key w/ KeeperHub
+   │  alert · inline [✅ Repay][🛡 Supply][✋ Ignore] · callbacks   ├▶ encrypt + persist record
+   │                                                              └▶ bind telegramUserId, notify chat
+   └──────────  bot loop + watch loop  ◀── shared encrypted store ──▶ runGuardianOnce / executeRescue
+```
+
+- **Onboarding never touches chat.** The bot opens a **Mini App** rendering the existing web form; the
+  KeeperHub key POSTs straight to the backend over HTTPS. The Mini App forwards Telegram's signed
+  `initData`, which the server verifies (`server/verifyInitData.ts`: HMAC-SHA256 with
+  `secret = HMAC("WebAppData", botToken)`, plus a 24h `auth_date` freshness check) to authenticate the
+  user and bind their chat — so knowing someone's public wallet grants nothing.
+- **Watch + approve.** A watch loop re-reads every stored position every `WATCH_INTERVAL_MS`. Below
+  threshold it sizes the levers (`buildSnapshot` + `computeCandidates`, same as the dashboard) and
+  sends one-tap buttons; nothing broadcasts until the user taps, which runs
+  `executeRescue(candidateToDecision(chosen))`. `/auto` flips to autonomous `runGuardianOnce` +
+  notify. `/status`, `/stop`, `/help` round it out.
+- **Same engine, two seams.** The only new exports in the core are `candidateToDecision` (execute a
+  user-chosen lever without re-running the LLM) and `executeRescue` (steps 5–9 of `runGuardianOnce`,
+  factored out). Everything else is reused unchanged.
+- **One process, one container.** Bot and HTTP API share the store directly, so the server can notify
+  a chat the instant it stores a key. A multi-stage `Dockerfile` + `docker-compose.yml` (guardian +
+  redis) run the whole thing with `docker compose up`.
+- **Both primitives are unit-gated.** [scripts/test-security.ts](../scripts/test-security.ts)
+  (`npm run test-security`) signs an `initData` payload the way Telegram does and asserts every tamper
+  is rejected (flipped hash, swapped user, wrong bot token, stale `auth_date`, missing user), then
+  asserts the credential round-trips through AES-256-GCM, that a wrong master key / tampered ciphertext
+  fail the auth tag, and that the serialized blob holds no plaintext `kh_`. Exits non-zero on any miss.
+
 
 ## The deployed monitor (the "watches" half)
 

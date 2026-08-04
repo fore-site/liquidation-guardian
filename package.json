@@ -10,6 +10,13 @@
     "guardian": "tsx src/agent/guardian.ts",
     "deploy-workflow": "tsx scripts/deploy-workflow.ts",
     "test-sizing": "tsx scripts/test-sizing.ts",
+    "test-security": "tsx scripts/test-security.ts",
+    "dev:api": "tsx server/serve.ts",
+    "dev:web": "npm --prefix web run dev",
+    "build:web": "npm --prefix web run build",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up",
+    "docker:dev": "docker compose up --build",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
@@ -17,11 +24,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
-    "dotenv": "^17.0.0"
+    "dotenv": "^17.0.0",
+    "redis": "^6.2.0"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
-    "@types/node": "^24.0.0"
+    "typescript": "^5.6.0"
   }
 }

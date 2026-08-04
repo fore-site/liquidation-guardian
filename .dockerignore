@@ -1,0 +1,19 @@
+# Build context trimming — keep the image small and secrets out of it.
+node_modules/
+web/node_modules/
+web/dist/
+dist/
+.git/
+.env
+.env.local
+*.key
+*.log
+.guardian/
+.playwright-mcp/
+.DS_Store
+.vscode/
+.idea/
+# Docs/scripts aren't needed in the runtime image.
+docs/
+scripts/
+*.md

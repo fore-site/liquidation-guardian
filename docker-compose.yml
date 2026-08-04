@@ -1,0 +1,28 @@
+# Liquidation Guardian — the Guardian server (API + Mini App + Telegram bot) and its
+# Redis store. `docker compose up --build` after filling in .env brings up both.
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    # Not published to the host by default — only the guardian service reaches it.
+    expose:
+      - "6379"
+
+  guardian:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      # Override REDIS_URL from .env so the app finds Redis on the compose network.
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8787:8787"
+
+volumes:
+  redis-data:

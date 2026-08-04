@@ -277,7 +277,13 @@ function assetUsdWeight(asset: AssetPosition, sideTotalUsd: number, sideLen: num
   return 0;
 }
 
-function candidateToDecision(c: RescueCandidate, reasoning: string): RescueDecision {
+/**
+ * Turn a sized {@link RescueCandidate} into an executable {@link RescueDecision}
+ * with a given rationale. Exported so a caller (the Telegram bot) can execute a
+ * *specific user-chosen* lever without re-running the LLM — it picks the candidate
+ * off the sized list and passes it straight here.
+ */
+export function candidateToDecision(c: RescueCandidate, reasoning: string): RescueDecision {
   return {
     action: c.action,
     asset: c.asset.symbol,

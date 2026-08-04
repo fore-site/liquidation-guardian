@@ -32,11 +32,64 @@ Under active development for the hackathon (deadline 2026-08-13). See [docs/ARCH
    npm run first-tx
    ```
 
+## Dashboard (read-only UI)
+
+A web dashboard puts a face on the agent: your live health factor (color-coded by risk), the
+collateral/debt breakdown, the sized rescue levers the Guardian is choosing between, and a history
+of the rescues it has already executed onchain — each linking to the transaction on Etherscan.
+
+It's split in two so a credential never reaches the browser:
+
+- `server/` — a small API that holds your KeeperHub key **encrypted at rest** (AES-256-GCM, in a
+  Redis-backed store) and exposes only read data (`/api/status`, `/api/rescues`). You enter your key,
+  wallet, and risk levels once in the onboarding form; the key is kept server-side (HttpOnly cookie
+  session), never in the page.
+- `web/` — a Vite + React app that renders that data and proxies `/api` to the server in dev.
+
+```bash
+# The server needs a master key (encrypts stored keys) and Redis. One-time setup:
+#   echo "GUARDIAN_MASTER_KEY=$(openssl rand -hex 32)" >> .env
+#   redis-server &            # or point REDIS_URL at a hosted Redis
+
+# terminal 1 — the API (each user enters their own KeeperHub key in the UI)
+npm run dev:api
+
+# terminal 2 — the dashboard
+cd web && npm install && npm run dev   # then open http://localhost:5173
+```
+
+The dashboard is an **observer** — it never signs or broadcasts. Rescues are executed by the
+Guardian through KeeperHub; the UI just watches. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Telegram bot + Mini App (phone-native watch + approve)
+
+The same server also runs a Telegram bot when `TELEGRAM_BOT_TOKEN` is set — the "last mile" on a
+phone. It **pushes** an alert the instant your health factor drops and lets you approve the fix with
+one tap (`[✅ Repay] [🛡 Supply] [✋ Ignore]`); `/auto` switches to autonomous rescue-and-notify.
+
+Onboarding runs through a **Telegram Mini App** (the web form above): your KeeperHub key goes straight
+to the server over HTTPS, **never through a chat message**. The server verifies Telegram's signed
+`initData` to bind your chat, then encrypts the key at rest. Commands: `/status`, `/auto`, `/stop`,
+`/help`.
+
+```bash
+# 1. Create a bot with @BotFather, grab the token → TELEGRAM_BOT_TOKEN in .env
+# 2. Mini Apps need public HTTPS: tunnel to the app and set WEBAPP_URL to that URL,
+#    then register it with @BotFather (/setmenubutton).
+# 3. Run the whole stack (server + Telegram bot + Redis) in Docker:
+docker compose up --build            # or: npm run docker:dev
+```
+
+The bot's long-poll needs no public URL — only the Mini App onboarding does — so `/status`, `/auto`,
+alerts, and approvals are demoable behind just a tunnel to the web form.
+
 ## Repository layout
 
 ```
 src/workflows/   KeeperHub workflow definitions (trigger + read + condition)
 src/agent/       LLM decision layer (repay vs. add-collateral, + amount)
+server/          Hosted API + Telegram bot (encrypted key store, watch loop)
+web/             Vite + React dashboard / Telegram Mini App
 scripts/         Setup & verification (first-tx dry-run, health checks)
 docs/            Architecture, teardown, and pitch material
 ```

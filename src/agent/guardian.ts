@@ -103,6 +103,36 @@ export async function runGuardianOnce(opts: {
     return { status: "no_action", position, decision, detail: "Computed rescue amount is zero." };
   }
 
+  // 5–9. Build → simulate → (dry-run stop) → execute → confirm.
+  return executeRescue({ keeperHub, chainId, user, decision, dryRun: opts.dryRun, position });
+}
+
+/**
+ * Build, preflight, and (unless `dryRun`) broadcast a single already-decided rescue,
+ * then confirm the health factor recovered. This is steps 5–9 of {@link runGuardianOnce},
+ * factored out so a caller that has ALREADY chosen the lever — the Telegram bot on a
+ * one-tap approval, via `candidateToDecision(chosen)` — can execute it without
+ * re-reading, re-deciding, or re-running the LLM.
+ *
+ * Invariant preserved: every write is simulated first and nothing broadcasts unless
+ * the preflight is clean.
+ *
+ * `position` (the pre-rescue read) is optional and used only to populate the result
+ * on a `simulation_failed`/`dry-run` path; on a successful broadcast the returned
+ * `position` is always the fresh post-rescue read.
+ */
+export async function executeRescue(opts: {
+  keeperHub: KeeperHub;
+  chainId: string;
+  user: string;
+  decision: RescueDecision;
+  dryRun?: boolean;
+  /** Pre-rescue position, if the caller already has it (avoids a redundant read on failure paths). */
+  position?: AavePosition;
+}): Promise<GuardianResult> {
+  const { keeperHub, chainId, user, decision } = opts;
+  const position = opts.position ?? (await keeperHub.readAavePosition(chainId, user));
+
   // 5. Build the Aave action body (amount is already token base units; asset address
   //    comes from the decision, so we don't re-resolve).
   const actionType = decision.action === "repay" ? "aave-v3/repay" : "aave-v3/supply";
