@@ -1,0 +1,27 @@
+{
+  "name": "liquidation-guardian",
+  "version": "0.1.0",
+  "description": "An AI agent that keeps DeFi borrow positions safe from liquidation, executing the fix onchain through KeeperHub.",
+  "type": "module",
+  "scripts": {
+    "first-tx": "tsx scripts/first-tx.ts",
+    "read-position": "tsx scripts/read-position.ts",
+    "setup-position": "tsx scripts/setup-position.ts",
+    "guardian": "tsx src/agent/guardian.ts",
+    "deploy-workflow": "tsx scripts/deploy-workflow.ts",
+    "test-sizing": "tsx scripts/test-sizing.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "dotenv": "^17.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^24.0.0"
+  }
+}

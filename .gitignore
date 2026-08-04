@@ -1,0 +1,19 @@
+# Secrets — never commit
+.env
+.env.local
+*.key
+
+# KeeperHub wallet (server-side custody, but the local file authenticates signing)
+.keeperhub/
+wallet.json
+
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

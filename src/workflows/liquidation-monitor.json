@@ -1,0 +1,86 @@
+{
+  "name": "Liquidation Guardian — Monitor",
+  "description": "Deterministic Aave v3 health-factor watcher. On a schedule it reads the position's HF and, if it falls below the act-threshold, the true branch fires. The Liquidation Guardian (LLM) — triggered out-of-band on the free plan — then sizes and executes the rescue back through KeeperHub. (Add the HTTP handoff node on KeeperHub Pro for an in-workflow webhook.)",
+  "nodes": [
+    {
+      "id": "trigger-1",
+      "type": "trigger",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "type": "trigger",
+        "label": "Schedule",
+        "config": {
+          "triggerType": "Schedule",
+          "scheduleCron": "*/10 * * * *",
+          "scheduleTimezone": "UTC"
+        },
+        "status": "idle"
+      }
+    },
+    {
+      "id": "step-1",
+      "type": "action",
+      "position": {
+        "x": 252,
+        "y": 0
+      },
+      "data": {
+        "type": "action",
+        "label": "Get Aave Health Factor",
+        "description": "Read the health factor from Aave v3 for the monitored wallet",
+        "config": {
+          "user": "0x88678C9ae3798Aa77c753C3a6a028FE9FA5f7E3E",
+          "network": "11155111",
+          "actionType": "aave-v3/get-user-account-data",
+          "_protocolMeta": "{\"protocolSlug\":\"aave-v3\",\"contractKey\":\"pool\",\"functionName\":\"getUserAccountData\",\"actionType\":\"read\"}"
+        },
+        "status": "idle"
+      }
+    },
+    {
+      "id": "step-2",
+      "type": "action",
+      "position": {
+        "x": 504,
+        "y": 0
+      },
+      "data": {
+        "type": "action",
+        "label": "HF below threshold?",
+        "description": "True when the health factor is below 1.15 (act-threshold)",
+        "config": {
+          "actionType": "Condition",
+          "group": {
+            "id": "group-1",
+            "logic": "AND",
+            "rules": [
+              {
+                "id": "rule-1",
+                "operator": "<",
+                "leftOperand": "{{@step-1:Get Aave Health Factor.healthFactor}}",
+                "rightOperand": "1150000000000000000"
+              }
+            ]
+          },
+          "condition": "{{@step-1:Get Aave Health Factor.healthFactor}} < 1150000000000000000"
+        },
+        "status": "idle"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-trigger-1-step-1",
+      "source": "trigger-1",
+      "target": "step-1"
+    },
+    {
+      "id": "e-step-1-step-2",
+      "source": "step-1",
+      "target": "step-2"
+    }
+  ]
+}
