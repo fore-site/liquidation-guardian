@@ -22,15 +22,24 @@ Under active development for the hackathon (deadline 2026-08-13). See [docs/ARCH
 2. **Create an API key.** Settings → API Keys → Organisation tab. It starts with `kh_`.
 3. **Fund on Sepolia.** Get free test ETH from a Sepolia faucet to your wallet address.
 4. **Configure.** `cp .env.example .env` and fill in your key, wallet address, and chain.
-5. **Connect the MCP server:**
-   ```bash
-   claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp \
-     --header "Authorization: Bearer kh_your_key_here"
-   ```
+5. **LLM config (decision layer).** The agent runs on NVIDIA's hosted NIM suite (OpenAI-compatible).
+   Add `NVIDIA_API_KEY` (from [build.nvidia.com](https://build.nvidia.com), Integrate tab), keep
+   `BASE_URL=https://integrate.api.nvidia.com/v1`, and optionally set
+   `LLM_MODEL=deepseek-ai/deepseek-v4-flash` for a snappier demo (the default `-v4-pro` cold-starts
+   slowly). If `BASE_URL` is exported in your shell, it shadows `.env` — unset it first.
 6. **Verify with a dry-run first tx** (simulate, no broadcast), then execute for real:
    ```bash
    npm run first-tx
    ```
+
+## Try the Guardian
+
+```bash
+npm run setup-position     # open a fresh at-risk LINK/LINK position (HF just above 1.0)
+npm run guardian           # the LLM picks the fix; KeeperHub simulates → executes → confirms
+```
+
+A full demo script (video + live walkthrough) is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
 ## Dashboard (read-only UI)
 

@@ -188,17 +188,24 @@ The whole tier ladder is unit-verified in [scripts/test-sizing.ts](../scripts/te
 KeeperHub dry-run. The **live demo stays LINK/LINK** because Sepolia only lets a single wallet
 open a single-asset position (TEARDOWN F5); the multi-asset path is proven by the unit suite.
 
-## Demo plan (Sepolia)
+## Demo plan (Sepolia, confirmed live)
 
-Mainnet Aave positions are real money and slow to set up. For the demo we either:
-1. Use a Sepolia Aave-v3 deployment with a test position we can push toward liquidation, **or**
-2. If Sepolia Aave is unavailable/flaky, demo the full pipeline with a threshold-triggered
-   `transfer`/`contract-call` as the "fix," and clearly note the Aave action is the production path.
+Sepolia Aave v3 IS live through KeeperHub (also chain 1, 8453, 42161 — not Base Sepolia, Arb
+Sepolia, Op Sepolia, Polygon). The live demo is a **LINK collateral + LINK debt** position because
+that's what this Sepolia deployment allows (stables are supply-capped / have no borrow liquidity —
+TEARDOWN F5). A single-asset position is the *cleanest* demo, not a compromise: the price cancels
+out of the health factor, so the rescue amount is exact token arithmetic with no oracle.
 
-Decision deferred until we confirm what's live on Sepolia via the MCP `search_protocol_actions` tool.
+The demo loop (see [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md)):
+`npm run setup-position` opens a fresh at-risk position (borrows up to ~97% of capacity, HF just
+above 1.0) → `npm run guardian` reads it, the decision layer (NVIDIA NIM) picks repay vs. supply,
+KeeperHub simulates first, then broadcasts and confirms. The real rescue tx is independently
+verifiable via RPC `eth_getLogs` on the Aave Pool's `Repay` event (TEARDOWN F9).
 
-## Open questions to confirm in Discord #help
+## Resolved earlier open questions
 
-- Is `aave-v3` available on Sepolia (11155111) via KeeperHub, or only mainnet/Base?
-- Gas sponsorship: brief says mainnet ETH; does it apply to our demo chain?
-- Are Stripe / x402scan surfaces (mentioned in the brief) actually live? (Not in current docs.)
+- **Is `aave-v3` on Sepolia?** Yes — confirmed live (this build's real rescue ran there).
+- **Gas sponsorship on testnets?** Yes — Sepolia transfers were fully gas-sponsored (balance
+  untouched to the wei), despite the brief saying "mainnet only" (TEARDOWN F4).
+- **Are Stripe / x402scan surfaces live?** Not in the current docs; nothing in this build depends on
+  them (TEARDOWN F1).
