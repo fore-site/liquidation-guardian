@@ -152,15 +152,29 @@ const server = createServer((req, res) => {
 
   const url = (req.url ?? "/").split("?")[0];
   route(req, res, url).catch((err) => {
-    // Never surface internals (which could include the key) to the client.
-    console.error(`[${req.method} ${url}]`, err instanceof Error ? err.message : err);
+    // A malformed request is the client's fault — surface it. Anything else is an
+    // upstream/internal failure; never surface internals (which could include the key).
+    if (err instanceof HttpError) {
+      return json(res, err.status, { error: err.message });
+    }
+    console.error(
+      JSON.stringify({
+        t: new Date().toISOString(),
+        level: "error",
+        c: "serve",
+        msg: `route failed: ${req.method} ${url}`,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
     json(res, 500, { error: "Upstream read failed. Check the API server logs." });
   });
 });
 
 async function route(req: IncomingMessage, res: ServerResponse, url: string): Promise<void> {
   // Public routes.
-  if (url === "/api/health") return json(res, 200, { ok: true });
+  if (url === "/api/health") {
+    return json(res, 200, { ok: true, redis: store.isReady, time: new Date().toISOString() });
+  }
 
   if (url === "/api/session" && req.method === "POST") return openSession(req, res);
   if (url === "/api/session" && req.method === "DELETE") return closeSession(req, res);
@@ -322,7 +336,13 @@ const MIME: Record<string, string> = {
 
 async function serveStatic(url: string, res: ServerResponse): Promise<void> {
   // Resolve within WEB_DIST and refuse anything that escapes it (path traversal).
-  const rel = normalize(decodeURIComponent(url)).replace(/^(\.\.[/\\])+/, "");
+  // decodeURIComponent can throw on a malformed escape — treat it as a 400, not a 500.
+  let rel: string;
+  try {
+    rel = normalize(decodeURIComponent(url)).replace(/^(\.\.[/\\])+/, "");
+  } catch {
+    return end(res, 400, "Bad request");
+  }
   let filePath = join(WEB_DIST, rel);
   if (!filePath.startsWith(WEB_DIST)) return end(res, 403, "Forbidden");
 
@@ -353,11 +373,28 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > 8_192) throw new Error("Request body too large");
+    if (size > 8_192) throw new HttpError(413, "Request body too large");
     chunks.push(chunk as Buffer);
   }
   if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+  const text = Buffer.concat(chunks).toString("utf8");
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    throw new HttpError(400, "Request body must be valid JSON.");
+  }
+}
+
+/** An HTTP error whose status we want to surface to the client (vs. a 500). */
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HttpError";
+  }
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -387,6 +424,7 @@ async function main(): Promise<void> {
     console.log("(No TELEGRAM_BOT_TOKEN — running as the HTTP dashboard only.)");
   }
 
+  // Health-check route already reflects store readiness.
   server.listen(PORT, () => {
     console.log(`Guardian server on http://localhost:${PORT}`);
     console.log(`  API: POST/GET/DELETE /api/session · GET /api/status · /api/rescues · /api/health`);

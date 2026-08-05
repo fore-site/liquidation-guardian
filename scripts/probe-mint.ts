@@ -20,9 +20,16 @@ console.log("=== real execute raw response ===");
 try {
   const exec = await kh.executeAction("contract-call", body);
   console.log(JSON.stringify(exec, null, 2));
+  // A broadcast that didn't reach a terminal state is worth flagging.
+  const anyExec = exec as unknown as { executionId?: string };
+  if (anyExec.executionId) {
+    const final = await kh.waitForExecution(anyExec.executionId, { timeoutMs: 30_000 });
+    console.log("final status:", JSON.stringify(final, null, 2));
+  }
 } catch (e) {
   console.log("threw:", e instanceof Error ? e.message : e);
   const anyE = e as { body?: unknown; status?: number };
   if (anyE.body) console.log("body:", JSON.stringify(anyE.body, null, 2));
   if (anyE.status) console.log("status:", anyE.status);
+  process.exitCode = 1;
 }

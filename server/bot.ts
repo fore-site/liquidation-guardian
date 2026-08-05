@@ -99,9 +99,11 @@ export class GuardianBot {
 
   // ── long-poll loop ────────────────────────────────────────────────────────
   private async pollLoop(): Promise<void> {
+    let backoffMs = 1_000;
     while (this.running) {
       try {
         const updates = await this.tg.getUpdates(this.offset, 25);
+        backoffMs = 1_000; // success resets the backoff
         for (const u of updates) {
           this.offset = Math.max(this.offset, u.update_id + 1);
           await this.handleUpdate(u).catch((e) =>
@@ -109,9 +111,11 @@ export class GuardianBot {
           );
         }
       } catch (e) {
-        // Network blip / abort — back off briefly and keep polling.
+        // Network blip / abort — back off exponentially (bounded) before retrying so
+        // we don't hammer Telegram while it's unreachable.
         console.error("[bot] getUpdates:", e instanceof Error ? e.message : e);
-        await sleep(2000);
+        await sleep(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 60_000);
       }
     }
   }
@@ -251,8 +255,10 @@ export class GuardianBot {
       return;
     }
 
-    await this.tg.answerCallbackQuery(cq.id, "Executing…");
-    await this.tg.editMessageText(chatId, messageId, `⏳ Executing ${action} ${asset}…`);
+    await this.tg.answerCallbackQuery(cq.id, "Executing…").catch(() => undefined);
+    // Editing is cosmetic — a "message not modified" (double-tap) failure must not
+    // be mistaken for a rescue failure, so isolate it from the real work.
+    await this.tg.editMessageText(chatId, messageId, `⏳ Executing ${action} ${asset}…`).catch(() => undefined);
 
     try {
       // Re-read + re-size at approval time so we never act on a stale amount.
@@ -287,7 +293,7 @@ export class GuardianBot {
         position: pos,
       });
       await this.store.markAlerted(record.id);
-      await this.tg.editMessageText(chatId, messageId, this.renderResult(result, chosen));
+      await this.tg.editMessageText(chatId, messageId, this.renderResult(result, chosen)).catch(() => undefined);
     } catch (e) {
       await this.tg.editMessageText(
         chatId,
@@ -301,13 +307,18 @@ export class GuardianBot {
   private async watchLoop(): Promise<void> {
     // Small initial delay so the store/connection settle before the first sweep.
     await sleep(3000);
+    let backoffMs = this.watchIntervalMs;
     while (this.running) {
       try {
         await this.watchTick();
+        backoffMs = this.watchIntervalMs;
       } catch (e) {
+        // A tick failed wholesale (e.g. Redis down) — back off exponentially so we
+        // don't spin, but keep trying.
         console.error("[bot] watchTick:", e instanceof Error ? e.message : e);
+        backoffMs = Math.min(backoffMs * 2, 10 * 60 * 1000);
       }
-      await sleep(this.watchIntervalMs);
+      await sleep(backoffMs);
     }
   }
 
@@ -335,15 +346,30 @@ export class GuardianBot {
     if (record.lastAlertAt && Date.now() - record.lastAlertAt < ALERT_COOLDOWN_MS) return;
 
     if (record.autoMode) {
-      await this.store.markAlerted(record.id); // mark before acting to avoid a double-fire
-      const result = await runGuardianOnce({
-        keeperHub: kh,
-        llm: this.llm,
-        chainId: record.chainId,
-        user: record.wallet,
-        hfThreshold: record.hfThreshold,
-        hfTarget: record.hfTarget,
-      });
+      let result;
+      try {
+        result = await runGuardianOnce({
+          keeperHub: kh,
+          llm: this.llm,
+          chainId: record.chainId,
+          user: record.wallet,
+          hfThreshold: record.hfThreshold,
+          hfTarget: record.hfTarget,
+        });
+      } catch (err) {
+        // Rescue failed — do NOT mark alerted, so the next tick retries; and tell
+        // the user instead of silently dropping it.
+        console.error(`[bot] auto-rescue for ${short(record.wallet)} failed:`, err instanceof Error ? err.message : err);
+        await this.tg
+          .sendMessage(
+            chatId,
+            `❌ Auto-rescue failed for ${short(record.wallet)}: ${err instanceof Error ? err.message : err}. I'll keep watching.`,
+          )
+          .catch(() => undefined);
+        return;
+      }
+      // Only after a completed pass (any outcome) do we de-dupe the next tick.
+      await this.store.markAlerted(record.id);
       await this.tg.sendMessage(chatId, `🤖 Auto-rescue triggered.\n${this.renderResult(result)}`);
       return;
     }

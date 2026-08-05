@@ -45,20 +45,42 @@ export class TelegramClient {
   }
 
   private async call<T>(method: string, body: Record<string, unknown>): Promise<T> {
-    const res = await fetch(`${API_BASE}/bot${this.token}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      ok: boolean;
-      result?: T;
-      description?: string;
-    };
-    if (!data.ok) {
-      throw new Error(`Telegram ${method} failed: ${data.description ?? res.status}`);
+    const lastErr: unknown[] = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const res = await fetch(`${API_BASE}/bot${this.token}/${method}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok: boolean;
+          result?: T;
+          description?: string;
+        };
+        if (!data.ok) {
+          // 409/429 are transient-ish; everything else is definitive.
+          if (res.status === 429 || res.status >= 500) {
+            lastErr.push(new Error(`Telegram ${method} failed: ${data.description ?? res.status}`));
+            await sleep(500 * attempt);
+            continue;
+          }
+          throw new Error(`Telegram ${method} failed: ${data.description ?? res.status}`);
+        }
+        return data.result as T;
+      } catch (err) {
+        const aborted = err instanceof Error && err.name === "AbortError";
+        lastErr.push(aborted ? new Error(`Telegram ${method} timed out`) : err);
+        if (attempt === 3) break;
+        await sleep(500 * attempt);
+      } finally {
+        clearTimeout(timer);
+      }
     }
-    return data.result as T;
+    throw lastErr[lastErr.length - 1];
   }
 
   /**
@@ -136,4 +158,8 @@ export class TelegramClient {
   getMe(): Promise<{ id: number; username?: string }> {
     return this.call("getMe", {});
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }

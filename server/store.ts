@@ -95,7 +95,20 @@ export class GuardianStore {
   }
 
   async connect(): Promise<void> {
-    if (!this.redis.isOpen) await this.redis.connect();
+    if (this.redis.isOpen) return;
+    try {
+      await this.redis.connect();
+    } catch (err) {
+      // The redis client stays in a reconnectable state after a failed initial
+      // connect; surface it loudly rather than crashing the process.
+      console.error("[store] initial Redis connect failed:", err instanceof Error ? err.message : err);
+      throw err;
+    }
+  }
+
+  /** True if the underlying Redis socket is currently usable. */
+  get isReady(): boolean {
+    return this.redis.isOpen && this.redis.isReady;
   }
 
   async close(): Promise<void> {
@@ -173,7 +186,15 @@ export class GuardianStore {
 
   async getById(id: string): Promise<GuardianRecord | null> {
     const raw = await this.redis.get(REC(id));
-    return raw ? (JSON.parse(raw) as GuardianRecord) : null;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as GuardianRecord;
+    } catch {
+      // Corrupt/malformed record in Redis: log it and treat as missing so a single
+      // bad blob can't crash the watch loop or an API read.
+      console.error(`[store] corrupt record ${id} — skipping (${raw.slice(0, 80)}…)`);
+      return null;
+    }
   }
 
   async getByWallet(wallet: string, chainId: string): Promise<GuardianRecord | null> {
@@ -188,12 +209,22 @@ export class GuardianStore {
 
   /** Every stored record — the watch loop iterates this each tick. */
   async all(): Promise<GuardianRecord[]> {
-    const ids = await this.redis.sMembers(ALL_SET);
+    let ids: string[];
+    try {
+      ids = await this.redis.sMembers(ALL_SET);
+    } catch (err) {
+      // Redis is down: the watch loop can't know what to watch. Return empty so the
+      // loop survives and retries next tick instead of crashing the process.
+      console.error("[store] all() failed (Redis down?):", err instanceof Error ? err.message : err);
+      return [];
+    }
     const out: GuardianRecord[] = [];
     for (const id of ids) {
-      const rec = await this.getById(id);
+      const rec = await this.getById(id).catch(() => null);
       if (rec) out.push(rec);
-      else await this.redis.sRem(ALL_SET, id); // prune a dangling index entry
+      else {
+        await this.redis.sRem(ALL_SET, id).catch(() => undefined); // prune a dangling index entry
+      }
     }
     return out;
   }

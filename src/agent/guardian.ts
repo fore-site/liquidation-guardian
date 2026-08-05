@@ -17,7 +17,8 @@
 import "../net.js"; // patient IPv6→IPv4 failover; must run before any fetch
 import OpenAI from "openai";
 import { loadConfig } from "../config.js";
-import { KeeperHub, type AavePosition } from "../keeperhub.js";
+import { KeeperHub, type AavePosition, type UserReserveData } from "../keeperhub.js";
+import { createLogger } from "../log.js";
 import {
   decideRescueWithFallback,
   decideRescueDeterministic,
@@ -27,6 +28,12 @@ import {
 } from "./decide.js";
 import { SEPOLIA_RESERVES, VARIABLE_RATE_MODE, type ReserveInfo } from "./assets.js";
 import { readPriceUsd } from "./prices.js";
+
+const logger = createLogger("guardian");
+/** Human-facing pass log (plain console lines for the CLI demo). */
+function log(msg: string): void {
+  logger.info(msg);
+}
 
 export interface GuardianResult {
   status: "healthy" | "rescued" | "simulation_failed" | "no_action";
@@ -110,7 +117,9 @@ export async function runGuardianOnce(opts: {
       decision = d;
       log(`  (decided by ${source.provider})`);
     } catch (err) {
-      log(`LLM decision failed (${err instanceof Error ? err.message : err}); using deterministic fallback.`);
+      logger.warn("LLM decision failed; using deterministic fallback", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       decision = decideRescueDeterministic(snapshot, hfTarget);
     }
   } else {
@@ -188,16 +197,27 @@ export async function executeRescue(opts: {
   }
 
   // 7. Execute for real (fresh idempotency key inside executeAction).
-  log("Broadcasting rescue via KeeperHub…");
+  log(`Broadcasting rescue via KeeperHub…`);
   const exec = await keeperHub.executeAction(actionType, body);
   if (!exec.success) {
     return { status: "simulation_failed", position, decision, detail: exec.error };
   }
   log(`✅ Rescued. tx: ${exec.transactionLink ?? exec.transactionHash}`);
 
-  // 8. Confirm the health factor actually recovered.
-  const after = await keeperHub.readAavePosition(chainId, user);
-  log(`Health factor after rescue: ${fmtHf(after.healthFactor)}`);
+  // 8. Confirm the health factor actually recovered. The broadcast already
+  //    succeeded — a failed confirm read must NOT turn a successful rescue into a
+  //    reported failure; we surface the tx and note the confirm was skipped.
+  let after = position;
+  let confirmNote = "";
+  try {
+    after = await keeperHub.readAavePosition(chainId, user);
+    log(`Health factor after rescue: ${fmtHf(after.healthFactor)}`);
+  } catch (err) {
+    confirmNote = ` (post-rescue confirm read failed: ${err instanceof Error ? err.message : err})`;
+    logger.warn("post-rescue confirm read failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   return {
     status: "rescued",
@@ -205,6 +225,7 @@ export async function executeRescue(opts: {
     decision,
     transactionHash: exec.transactionHash,
     transactionLink: exec.transactionLink,
+    detail: confirmNote || undefined,
   };
 }
 
@@ -230,12 +251,24 @@ export async function buildSnapshot(
 ): Promise<PositionSnapshot> {
   const reserves = Object.values(SEPOLIA_RESERVES);
 
-  const reads = await Promise.all(
-    reserves.map(async (r) => ({
-      reserve: r,
-      data: await keeperHub.readUserReserve(chainId, r.address, user),
-    })),
-  );
+  // Read every reserve in parallel, but degrade gracefully: one failing/unreadable
+  // reserve must not lose the whole snapshot — the user's actual position is
+  // discovered from whatever reserves DID read. A total read failure still throws.
+  const reads = (
+    await Promise.all(
+      reserves.map(async (r) => {
+        try {
+          const data = await keeperHub.readUserReserve(chainId, r.address, user);
+          return { reserve: r, data };
+        } catch (err) {
+          logger.warn(`reserve read failed for ${r.symbol}`, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return null;
+        }
+      }),
+    )
+  ).filter((x): x is { reserve: ReserveInfo; data: UserReserveData } => x !== null);
 
   const debts: AssetPosition[] = [];
   const collaterals: AssetPosition[] = [];
@@ -284,10 +317,6 @@ function assetOf(r: ReserveInfo, tokens: bigint): AssetPosition {
     tokens,
     liqThresholdBps: r.liqThresholdBps,
   };
-}
-
-function log(msg: string): void {
-  console.log(msg);
 }
 
 // ── CLI entrypoint ──────────────────────────────────────────────────────────

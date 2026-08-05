@@ -7,6 +7,9 @@
  * boolean `simulate`).
  */
 import { randomUUID } from "node:crypto";
+import { createLogger } from "./log.js";
+
+const log = createLogger("keeperhub");
 
 const DEFAULT_BASE = "https://app.keeperhub.com/api";
 
@@ -56,6 +59,13 @@ export class KeeperHubError extends Error {
   }
 }
 
+/** Which HTTP statuses are safe to retry (transient upstream / rate-limit). */
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+/** Default per-attempt request timeout, ms. */
+const REQUEST_TIMEOUT_MS = 30_000;
+/** Max attempts incl. the first, with backoff between retries. */
+const MAX_ATTEMPTS = 3;
+
 /** Aave v3 getUserAccountData, parsed into human-readable numbers. */
 export interface AavePosition {
   /** Health factor as a float. Aave liquidates at 1.0. `Infinity` = no debt. */
@@ -89,40 +99,98 @@ export class KeeperHub {
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE;
   }
 
+  /**
+   * Perform a JSON request with a per-attempt timeout and automatic retry on
+   * transient failures (5xx, 429 honoring Retry-After, network errors). Non-retryable
+   * 4xx errors (auth, validation) fail fast on the first attempt. Every attempt is
+   * timed and logged so slow/retried calls are visible in the logs.
+   */
   private async request<T>(
     method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     opts: { body?: unknown; idempotencyKey?: string } = {},
   ): Promise<T> {
+    let lastErr: unknown;
+    let delayMs = 250;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const started = Date.now();
+      try {
+        const res = await this.fetchOnce(method, path, opts);
+        const out = await this.parseResponse<T>(res, method, path);
+        log.debug(`${method} ${path} ok`, { durationMs: Date.now() - started, attempt });
+        return out;
+      } catch (err) {
+        lastErr = err;
+        const status = err instanceof KeeperHubError ? err.status : 0;
+        // Non-retryable (a definitive 4xx, or a malformed response) → fail now.
+        if (status >= 400 && status < 500 && !RETRYABLE_STATUS.has(status)) throw err;
+        // Rate limited? Respect Retry-After (bounded) instead of the fixed backoff.
+        if (status === 429 && err instanceof KeeperHubError) {
+          const retryAfter = Number(
+            (err.body as { retryAfter?: number } | null)?.retryAfter ?? 0,
+          );
+          delayMs = Math.min(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000, 15_000);
+        }
+        if (attempt === MAX_ATTEMPTS) break;
+        log.warn(`${method} ${path} attempt ${attempt} failed`, {
+          status: status || "network",
+          error: err instanceof Error ? err.message : String(err),
+          retryInMs: Math.round(delayMs),
+          durationMs: Date.now() - started,
+        });
+        await sleep(delayMs);
+        delayMs = Math.min(delayMs * 2, 8_000); // exponential backoff
+      }
+    }
+    throw lastErr;
+  }
+
+  /** One raw HTTP attempt with a hard per-attempt timeout. */
+  private async fetchOnce(
+    method: "GET" | "POST" | "PATCH" | "DELETE",
+    path: string,
+    opts: { body?: unknown; idempotencyKey?: string },
+  ): Promise<Response> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
     };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
-
-    // The API rate-limits at 60 req/min and returns Retry-After on 429.
-    if (res.status === 429) {
-      const retryAfter = Number(res.headers.get("Retry-After") ?? "1");
-      throw new KeeperHubError(
-        `Rate limited; retry after ${retryAfter}s`,
-        429,
-        await safeJson(res),
-      );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
     }
+  }
 
+  /** Read + shape the response; throws KeeperHubError for HTTP errors. */
+  private async parseResponse<T>(
+    res: Response,
+    method: "GET" | "POST" | "PATCH" | "DELETE",
+    path: string,
+  ): Promise<T> {
     const body = await safeJson(res);
     if (!res.ok) {
+      const retryAfterRaw = res.headers.get("Retry-After");
+      const retryAfter = Number(retryAfterRaw ?? "0");
       const detail =
         (body as { error?: string; detail?: string })?.error ??
         (body as { detail?: string })?.detail ??
         res.statusText;
-      throw new KeeperHubError(`KeeperHub ${method} ${path}: ${detail}`, res.status, body);
+      throw new KeeperHubError(
+        `KeeperHub ${method} ${path}: ${detail}`,
+        res.status,
+        Number.isFinite(retryAfter) && retryAfter > 0 ? { ...(body as object), retryAfter } : body,
+      );
     }
     return body as T;
   }
@@ -224,15 +292,38 @@ export class KeeperHub {
     const intervalMs = opts.intervalMs ?? 2_000;
     const deadline = Date.now() + timeoutMs;
     let last: Record<string, unknown> = {};
+
     while (Date.now() < deadline) {
-      last = await this.getExecutionStatus(executionId);
+      try {
+        last = await this.getExecutionStatus(executionId);
+      } catch (err) {
+        // A status read failing is not fatal — keep polling until the deadline.
+        log.warn(`status poll for ${executionId} failed`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await sleep(intervalMs);
+        continue;
+      }
       const status = String(last.status ?? "").toLowerCase();
       if (["success", "confirmed", "failed", "reverted", "error"].includes(status)) {
         return last;
       }
       await sleep(intervalMs);
     }
-    return last;
+
+    // Timed out while still pending. One final read in case the terminal status
+    // landed just after the loop; then surface the (unresolved) state explicitly.
+    try {
+      last = await this.getExecutionStatus(executionId);
+      const status = String(last.status ?? "").toLowerCase();
+      if (["success", "confirmed", "failed", "reverted", "error"].includes(status)) return last;
+    } catch {
+      /* keep the last polled state */
+    }
+    throw new Error(
+      `Execution ${executionId} did not reach a terminal state within ${timeoutMs}ms ` +
+        `(last status: ${String(last.status ?? "unknown")}).`,
+    );
   }
 
   /** Read + parse an Aave v3 position (health factor, collateral, debt). */
@@ -264,12 +355,13 @@ export class KeeperHub {
     if (!res.success || !res.result) {
       throw new Error(`Aave reserve read failed: ${res.error ?? "unknown error"}`);
     }
+    const raw = res.result;
     return {
-      aTokenBalance: BigInt(res.result.currentATokenBalance ?? "0"),
-      variableDebt: BigInt(res.result.currentVariableDebtTokenBalance ?? "0"),
-      usageAsCollateralEnabled: res.result.usageAsCollateralEnabled === "true" ||
-        (res.result.usageAsCollateralEnabled as unknown) === true,
-      raw: res.result,
+      aTokenBalance: toBigInt(raw.currentATokenBalance, "0"),
+      variableDebt: toBigInt(raw.currentVariableDebtTokenBalance, "0"),
+      usageAsCollateralEnabled: raw.usageAsCollateralEnabled === "true" ||
+        (raw.usageAsCollateralEnabled as unknown) === true,
+      raw,
     };
   }
 
@@ -367,17 +459,34 @@ export interface UserReserveData {
 
 /** Convert Aave's raw getUserAccountData into human numbers. */
 export function parseAavePosition(raw: Record<string, string>): AavePosition {
-  const hfRaw = BigInt(raw.healthFactor ?? "0");
+  const hfRaw = toBigInt(raw.healthFactor, "0");
   const healthFactor = hfRaw >= UINT256_MAX ? Infinity : Number(hfRaw) / Number(WAD);
   return {
     healthFactor,
-    totalCollateralUsd: Number(BigInt(raw.totalCollateralBase ?? "0")) / Number(BASE_CCY),
-    totalDebtUsd: Number(BigInt(raw.totalDebtBase ?? "0")) / Number(BASE_CCY),
-    availableBorrowsUsd: Number(BigInt(raw.availableBorrowsBase ?? "0")) / Number(BASE_CCY),
+    totalCollateralUsd: toNumber(raw.totalCollateralBase) / Number(BASE_CCY),
+    totalDebtUsd: toNumber(raw.totalDebtBase) / Number(BASE_CCY),
+    availableBorrowsUsd: toNumber(raw.availableBorrowsBase) / Number(BASE_CCY),
     // currentLiquidationThreshold is in basis points (e.g. 8250 = 82.5%).
-    liquidationThreshold: Number(raw.currentLiquidationThreshold ?? "0") / 10_000,
+    liquidationThreshold: toNumber(raw.currentLiquidationThreshold) / 10_000,
     raw,
   };
+}
+
+/** Parse a decimal string to bigint, defaulting on malformed input. */
+function toBigInt(v: string | undefined, fallback: string): bigint {
+  if (v == null || v === "") return BigInt(fallback);
+  try {
+    return BigInt(v);
+  } catch {
+    return BigInt(fallback);
+  }
+}
+
+/** Parse a decimal string to number, defaulting to 0 on malformed input. */
+function toNumber(v: string | undefined): number {
+  if (v == null || v === "") return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
 async function safeJson(res: Response): Promise<unknown> {

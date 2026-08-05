@@ -38,6 +38,86 @@ const dryRun = process.argv.includes("--dry-run");
 const user = cfg.walletAddress;
 const chainId = cfg.chainId;
 
+async function main(): Promise<void> {
+  console.log(`Setting up demo position for ${user} on chain ${chainId}${dryRun ? " (DRY RUN)" : ""}`);
+
+  // 1. Mint LINK (collateral + a buffer for the later rescue repay).
+  await step("Mint 200 LINK (faucet)", "contract-call", {
+    chainId,
+    contractAddress: SEPOLIA_FAUCET,
+    functionName: "mint",
+    functionArgs: JSON.stringify([LINK.address, user, toBaseUnits(LINK, MINT_LINK)]),
+  });
+
+  // 2. Approve the pool to pull our LINK (cover supply + repay).
+  await step("Approve Pool for LINK", "contract-call", {
+    chainId,
+    contractAddress: LINK.address,
+    functionName: "approve",
+    functionArgs: JSON.stringify([SEPOLIA_POOL, toBaseUnits(LINK, MINT_LINK)]),
+  });
+
+  // 3. Supply LINK as collateral.
+  await step("Supply LINK collateral", "aave-v3/supply", {
+    chainId,
+    asset: LINK.address,
+    amount: toBaseUnits(LINK, SUPPLY_LINK),
+    onBehalfOf: user,
+    referralCode: "0",
+  });
+
+  if (dryRun) {
+    console.log("\nDry run complete — mint/approve/supply all simulate clean.");
+    console.log("(Borrow amount depends on live capacity; run for real to open the position.)");
+    return;
+  }
+
+  // 4. Read capacity, then borrow up to BORROW_FRACTION of it.
+  const pos = await kh.readAavePosition(chainId, user);
+  console.log(`\nAfter supply: collateral $${pos.totalCollateralUsd.toFixed(2)}, available borrows $${pos.availableBorrowsUsd.toFixed(2)}`);
+
+  // Convert the USD borrow capacity to LINK using the position's own implied price
+  // (collateralUsd / collateralTokens) — no external oracle needed.
+  const collReserve = await kh.readUserReserve(chainId, LINK.address, user);
+  const collTokens = Number(collReserve.aTokenBalance) / 10 ** LINK.decimals;
+  if (!Number.isFinite(collTokens) || collTokens <= 0) {
+    throw new Error("No LINK collateral found after supply — aborting before borrow.");
+  }
+  const linkUsd = pos.totalCollateralUsd / collTokens;
+  if (!Number.isFinite(linkUsd) || linkUsd <= 0) {
+    throw new Error(`Implied LINK price is invalid ($${linkUsd}) — aborting before borrow.`);
+  }
+  const borrowUsd = pos.availableBorrowsUsd * BORROW_FRACTION;
+  const borrowLink = borrowUsd / linkUsd;
+  if (!Number.isFinite(borrowLink) || borrowLink <= 0) {
+    throw new Error(`Computed borrow amount is invalid (${borrowLink} LINK) — aborting.`);
+  }
+  console.log(`Borrowing ${borrowLink.toFixed(4)} LINK (~$${borrowUsd.toFixed(2)}, ${(BORROW_FRACTION * 100).toFixed(0)}% of capacity)…`);
+
+  await step("Borrow LINK to the edge", "aave-v3/borrow", {
+    chainId,
+    asset: LINK.address,
+    amount: toBaseUnits(LINK, borrowLink),
+    interestRateMode: VARIABLE_RATE_MODE,
+    referralCode: "0",
+    onBehalfOf: user,
+  });
+
+  // 5. Show the resulting at-risk position.
+  const after = await kh.readAavePosition(chainId, user);
+  console.log(`\n✅ Position open. Health factor now ${fmtHf(after.healthFactor)} (threshold ${cfg.hfThreshold}).`);
+  console.log(`   Run 'npm run guardian' to watch the Guardian rescue it.`);
+}
+
+main().catch((err) => {
+  console.error("\nsetup-position failed:", err instanceof Error ? err.message : err);
+  process.exit(1);
+});
+
+function fmtHf(hf: number): string {
+  return Number.isFinite(hf) ? hf.toFixed(4) : "∞";
+}
+
 /** Simulate a call; if clean and not a dry run, broadcast and wait for confirmation. */
 async function step(
   label: string,
@@ -61,71 +141,14 @@ async function step(
   console.log(`  broadcast: ${exec.transactionLink ?? exec.transactionHash ?? "(sent)"}`);
   const anyExec = exec as unknown as { executionId?: string };
   if (anyExec.executionId) {
-    const final = await kh.waitForExecution(anyExec.executionId);
-    console.log(`  status: ${final.status ?? "?"}`);
+    // Confirmation is best-effort here: the broadcast already succeeded; a slow
+    // mempool or a status-poll hiccup must not abort the rest of the setup.
+    try {
+      const final = await kh.waitForExecution(anyExec.executionId, { timeoutMs: 30_000 });
+      console.log(`  status: ${final.status ?? "?"}`);
+    } catch (err) {
+      console.log(`  (status poll unfinished: ${err instanceof Error ? err.message : err})`);
+    }
   }
 }
 
-console.log(`Setting up demo position for ${user} on chain ${chainId}${dryRun ? " (DRY RUN)" : ""}`);
-
-// 1. Mint LINK (collateral + a buffer for the later rescue repay).
-await step("Mint 200 LINK (faucet)", "contract-call", {
-  chainId,
-  contractAddress: SEPOLIA_FAUCET,
-  functionName: "mint",
-  functionArgs: JSON.stringify([LINK.address, user, toBaseUnits(LINK, MINT_LINK)]),
-});
-
-// 2. Approve the pool to pull our LINK (cover supply + repay).
-await step("Approve Pool for LINK", "contract-call", {
-  chainId,
-  contractAddress: LINK.address,
-  functionName: "approve",
-  functionArgs: JSON.stringify([SEPOLIA_POOL, toBaseUnits(LINK, MINT_LINK)]),
-});
-
-// 3. Supply LINK as collateral.
-await step("Supply LINK collateral", "aave-v3/supply", {
-  chainId,
-  asset: LINK.address,
-  amount: toBaseUnits(LINK, SUPPLY_LINK),
-  onBehalfOf: user,
-  referralCode: "0",
-});
-
-if (dryRun) {
-  console.log("\nDry run complete — mint/approve/supply all simulate clean.");
-  console.log("(Borrow amount depends on live capacity; run for real to open the position.)");
-  process.exit(0);
-}
-
-// 4. Read capacity, then borrow up to BORROW_FRACTION of it.
-const pos = await kh.readAavePosition(chainId, user);
-console.log(`\nAfter supply: collateral $${pos.totalCollateralUsd.toFixed(2)}, available borrows $${pos.availableBorrowsUsd.toFixed(2)}`);
-
-// Convert the USD borrow capacity to LINK using the position's own implied price
-// (collateralUsd / collateralTokens) — no external oracle needed.
-const collReserve = await kh.readUserReserve(chainId, LINK.address, user);
-const collTokens = Number(collReserve.aTokenBalance) / 10 ** LINK.decimals;
-const linkUsd = pos.totalCollateralUsd / collTokens;
-const borrowUsd = pos.availableBorrowsUsd * BORROW_FRACTION;
-const borrowLink = borrowUsd / linkUsd;
-console.log(`Borrowing ${borrowLink.toFixed(4)} LINK (~$${borrowUsd.toFixed(2)}, ${(BORROW_FRACTION * 100).toFixed(0)}% of capacity)…`);
-
-await step("Borrow LINK to the edge", "aave-v3/borrow", {
-  chainId,
-  asset: LINK.address,
-  amount: toBaseUnits(LINK, borrowLink),
-  interestRateMode: VARIABLE_RATE_MODE,
-  referralCode: "0",
-  onBehalfOf: user,
-});
-
-// 5. Show the resulting at-risk position.
-const after = await kh.readAavePosition(chainId, user);
-console.log(`\n✅ Position open. Health factor now ${fmtHf(after.healthFactor)} (threshold ${cfg.hfThreshold}).`);
-console.log(`   Run 'npm run guardian' to watch the Guardian rescue it.`);
-
-function fmtHf(hf: number): string {
-  return Number.isFinite(hf) ? hf.toFixed(4) : "∞";
-}

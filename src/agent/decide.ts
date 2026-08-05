@@ -28,6 +28,9 @@
  * exact. See docs/ARCHITECTURE.md ("Multi-asset sizing") and docs/TEARDOWN.md (F5).
  */
 import OpenAI from "openai";
+import { createLogger } from "../log.js";
+
+const log = createLogger("decide");
 
 const WAD = 10n ** 18n;
 
@@ -433,11 +436,20 @@ export async function decideRescue(
 
   const toolCall = completion.choices[0]?.message.tool_calls?.[0];
   if (!toolCall?.function) throw new Error("Model did not return a rescue decision.");
-  const raw = JSON.parse(toolCall.function.arguments) as {
-    action: "repay" | "supply";
-    assetSymbol: string;
-    reasoning: string;
-  };
+  let raw: { action: string; assetSymbol?: string; reasoning?: string };
+  try {
+    raw = JSON.parse(toolCall.function.arguments) as {
+      action: string;
+      assetSymbol?: string;
+      reasoning?: string;
+    };
+  } catch {
+    // Model returned unparseable JSON — protect the position deterministically.
+    return decideRescueDeterministic(snapshot, hfTarget, input.bufferBps);
+  }
+  if (typeof raw !== "object" || raw === null || typeof raw.action !== "string") {
+    return decideRescueDeterministic(snapshot, hfTarget, input.bufferBps);
+  }
 
   const wantAction = raw.action === "supply" ? "supply" : "repay";
   const wantSymbol = (raw.assetSymbol ?? "").trim().toUpperCase();
@@ -449,7 +461,7 @@ export async function decideRescue(
     // Model chose something we can't execute — protect the position deterministically.
     return decideRescueDeterministic(snapshot, hfTarget, input.bufferBps);
   }
-  return candidateToDecision(picked, raw.reasoning.trim());
+  return candidateToDecision(picked, (raw.reasoning ?? "").trim());
 }
 
 /** Which provider produced a decision, for logs/audit. */
@@ -485,8 +497,9 @@ export async function decideRescueWithFallback(opts: {
   } catch (err) {
     // Fall through to Gemini; keep the error for the audit trail.
     if (!gemini) throw err;
-    const detail = err instanceof Error ? err.message : String(err);
-    console.log(`NVIDIA decision failed (${detail}); trying Gemini…`);
+    log.warn("NVIDIA decision failed; trying Gemini", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // 2. Gemini fallback (free tier, OpenAI-compatible endpoint). Gemini's OpenAI-compat
