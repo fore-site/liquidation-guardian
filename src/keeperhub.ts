@@ -366,13 +366,12 @@ export class KeeperHub {
   }
 
   // ── Workflows (the deterministic "watches" half) ───────────────────────────
-  // Verified against the live API during the build: GET /api/workflows and
-  // PATCH/DELETE /api/workflows/:id all work. NOTE: the hosted plan does NOT
-  // expose REST create — POST /api/workflows returns 405; workflows are created
-  // via the MCP `create_workflow` tool or the web UI. `createWorkflow` below is
-  // kept for API completeness (other/self-hosted deployments may allow it), but
-  // scripts/deploy-workflow.ts deploys by PATCHing an existing workflow in place.
-  // The monitor is created *disabled* so no schedule fires until the user enables it.
+  // The hosted plan does NOT expose REST create — POST /api/workflows returns
+  // 405; workflows are created via the MCP `create_workflow` tool or the web UI.
+  // `createWorkflow` below is kept for API completeness (other/self-hosted
+  // deployments may allow it), but scripts/deploy-workflow.ts deploys by PATCHing
+  // an existing workflow in place. The monitor is created *disabled* so no
+  // schedule fires until the user enables it.
 
   /** List all workflows for the org. */
   listWorkflows(): Promise<WorkflowSummary[]> {

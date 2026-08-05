@@ -53,15 +53,6 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
     <div className="onboarding">
       <div className="onboarding-card">
         <h1>Liquidation Guardian</h1>
-        <p className="tagline">
-          Protect your Aave position from liquidation — automatically, 24/7.
-        </p>
-        {inTelegram && (
-          <p className="tagline">
-            Connecting your Telegram — your key goes straight to the server over HTTPS,
-            never through chat. I'll alert this chat when your position is at risk.
-          </p>
-        )}
 
         <form onSubmit={submit}>
           <label>
@@ -74,9 +65,7 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
               autoComplete="off"
               required
             />
-            <small>
-              From your KeeperHub dashboard. Held on the server, never stored in your browser.
-            </small>
+            <small>Held on the server, never stored in your browser.</small>
           </label>
 
           <label>
@@ -90,7 +79,7 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
               spellCheck={false}
               required
             />
-            <small>The wallet holding the Aave position to protect (Sepolia).</small>
+            <small>Wallet holding the Aave position to protect (Sepolia).</small>
           </label>
 
           <div className="sliders">
@@ -110,7 +99,7 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
                   if (target < t + 0.1) setTarget(Math.round((t + 0.5) * 100) / 100);
                 }}
               />
-              <small>When your health factor drops below this, the Guardian steps in.</small>
+              <small>Below this, the Guardian steps in.</small>
             </label>
 
             <label>
@@ -125,7 +114,7 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
                 value={Math.max(target, targetFloor)}
                 onChange={(e) => setTarget(Number(e.target.value))}
               />
-              <small>The safety level it rescues the position back up to.</small>
+              <small>Rescues the position back up to this.</small>
             </label>
           </div>
 

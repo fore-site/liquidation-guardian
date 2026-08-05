@@ -9,7 +9,7 @@ export function RescueHistory({ rescues }: { rescues: Rescue[] }) {
     <section className="card history">
       <h2>Rescue history</h2>
       {rescues.length === 0 ? (
-        <p className="muted">No rescues yet — the Guardian acts only when the health factor drops.</p>
+        <p className="muted">No rescues yet.</p>
       ) : (
         <ul className="history-list">
           {rescues.map((r) => (

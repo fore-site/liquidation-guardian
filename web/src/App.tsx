@@ -72,10 +72,7 @@ function Dashboard({ onDisconnect }: { onDisconnect: () => void }) {
   return (
     <div className="app">
       <header className="header">
-        <div>
-          <h1>Liquidation Guardian</h1>
-          <p className="tagline">Workflow watches · LLM decides · KeeperHub executes</p>
-        </div>
+        <h1>Liquidation Guardian</h1>
         <div className="header-actions">
           <button className="refresh" onClick={() => void load()} disabled={refreshing}>
             {refreshing ? "Refreshing…" : "Refresh"}
