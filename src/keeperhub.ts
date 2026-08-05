@@ -169,6 +169,19 @@ export class KeeperHub {
     return this.request<ActionResult<T>>("POST", `/execute/${actionType}`, {
       body: payload,
       idempotencyKey: opts.simulate ? undefined : (opts.idempotencyKey ?? randomUUID()),
+    }).then((res) => {
+      // The API's broadcast shape ({executionId, status}) has no `success` field —
+      // normalize so callers can rely on `success === true` for a clean write.
+      if (
+        !opts.simulate &&
+        res &&
+        typeof res === "object" &&
+        !("success" in res) &&
+        "executionId" in res
+      ) {
+        return { success: true, ...(res as Record<string, unknown>) } as ActionResult<T>;
+      }
+      return res;
     });
   }
 

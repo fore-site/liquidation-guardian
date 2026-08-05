@@ -19,7 +19,7 @@ import OpenAI from "openai";
 import { loadConfig } from "../config.js";
 import { KeeperHub, type AavePosition } from "../keeperhub.js";
 import {
-  decideRescue,
+  decideRescueWithFallback,
   decideRescueDeterministic,
   type AssetPosition,
   type PositionSnapshot,
@@ -37,11 +37,23 @@ export interface GuardianResult {
   detail?: string;
 }
 
+/** LLM stack for the decision layer: primary + optional Gemini fallback + timeout. */
+export interface LlmConfig {
+  primary: OpenAI;
+  /** Model id on the primary provider (e.g. NVIDIA's catalog). */
+  primaryModel?: string;
+  /** Optional Gemini free-tier fallback (OpenAI-compatible endpoint). */
+  gemini?: OpenAI;
+  geminiModel?: string;
+  /** Per-attempt budget in ms. */
+  timeoutMs?: number;
+}
+
 /** One full guardian pass over a single position. */
 export async function runGuardianOnce(opts: {
   keeperHub: KeeperHub;
-  /** LLM client for the decision. If null, a deterministic fallback is used. */
-  llm: OpenAI | null;
+  /** LLM stack for the decision. If null, deterministic sizing is used. */
+  llm: LlmConfig | null;
   chainId: string;
   user: string;
   hfThreshold: number;
@@ -81,13 +93,22 @@ export async function runGuardianOnce(opts: {
   );
 
   // 4. At risk — decide which lever to pull (amount sized in code either way).
-  //    Use the LLM when available; fall back to deterministic sizing if not, so
-  //    the position stays protected even when the LLM is unreachable.
+  //    Use the LLM stack when available; fall back to deterministic sizing if not,
+  //    so the position stays protected even when every LLM is unreachable.
   let decision: RescueDecision;
   if (llm) {
     log("⚠️  Below threshold — asking the decision layer for the fix…");
     try {
-      decision = await decideRescue(llm, { snapshot, hfThreshold, hfTarget });
+      const { decision: d, source } = await decideRescueWithFallback({
+        primary: llm.primary,
+        primaryModel: llm.primaryModel,
+        gemini: llm.gemini,
+        geminiModel: llm.geminiModel,
+        timeoutMs: llm.timeoutMs,
+        input: { snapshot, hfThreshold, hfTarget },
+      });
+      decision = d;
+      log(`  (decided by ${source.provider})`);
     } catch (err) {
       log(`LLM decision failed (${err instanceof Error ? err.message : err}); using deterministic fallback.`);
       decision = decideRescueDeterministic(snapshot, hfTarget);
@@ -271,20 +292,36 @@ function log(msg: string): void {
 
 // ── CLI entrypoint ──────────────────────────────────────────────────────────
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const cfg = loadConfig(); // LLM key optional — deterministic fallback if absent.
+  const cfg = loadConfig(); // LLM keys optional — deterministic fallback if absent.
   const keeperHub = new KeeperHub({ apiKey: cfg.keeperHubApiKey });
-  const llm = cfg.nvidiaApiKey
-    ? new OpenAI({
-        apiKey: cfg.nvidiaApiKey,
-        // Route through the NVIDIA NIM endpoint (or another OpenAI-compatible
-        // gateway) when BASE_URL is set; else the OpenAI SDK default.
-        ...(cfg.openaiBaseUrl ? { baseURL: cfg.openaiBaseUrl } : {}),
-      })
+
+  // Primary LLM: NVIDIA NIM (OpenAI-compatible endpoint).
+  const llm: LlmConfig | null = cfg.nvidiaApiKey
+    ? {
+        primary: new OpenAI({
+          apiKey: cfg.nvidiaApiKey,
+          // Route through the NVIDIA NIM endpoint (or another OpenAI-compatible
+          // gateway) when BASE_URL is set; else the OpenAI SDK default.
+          ...(cfg.openaiBaseUrl ? { baseURL: cfg.openaiBaseUrl } : {}),
+        }),
+        primaryModel: cfg.llmModel,
+        timeoutMs: cfg.llmTimeoutMs,
+        // Optional Gemini free-tier fallback (OpenAI-compatible endpoint).
+        ...(cfg.geminiApiKey
+          ? {
+              gemini: new OpenAI({
+                apiKey: cfg.geminiApiKey,
+                baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+              }),
+              geminiModel: cfg.geminiModel,
+            }
+          : {}),
+      }
     : null;
-  if (llm && cfg.openaiBaseUrl) {
-    console.log(`(Using OpenAI-compatible LLM router at ${cfg.openaiBaseUrl})`);
-  }
-  if (!llm) {
+
+  if (llm) {
+    console.log(`(LLM: ${cfg.llmModel} via ${cfg.openaiBaseUrl || "OpenAI SDK default"}${cfg.geminiApiKey ? " · Gemini fallback" : ""}, ${cfg.llmTimeoutMs}ms budget)`);
+  } else {
     console.log("(No NVIDIA_API_KEY set — running with the deterministic fallback decision.)");
   }
   const dryRun = process.argv.includes("--dry-run");

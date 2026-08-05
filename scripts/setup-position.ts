@@ -49,7 +49,14 @@ async function step(
   if (!sim.success) throw new Error(`  simulate failed: ${sim.error}`);
   console.log("  simulate: clean");
   if (dryRun) return;
-  const exec = await kh.executeAction(actionType, body);
+  // Broadcast can transiently fail (rate limit / upstream blip); retry once.
+  let exec;
+  try {
+    exec = await kh.executeAction(actionType, body);
+  } catch (err) {
+    console.log(`  execute threw (${err instanceof Error ? err.message : err}) — retrying once…`);
+    exec = await kh.executeAction(actionType, body);
+  }
   if (!exec.success) throw new Error(`  execute failed: ${exec.error}`);
   console.log(`  broadcast: ${exec.transactionLink ?? exec.transactionHash ?? "(sent)"}`);
   const anyExec = exec as unknown as { executionId?: string };

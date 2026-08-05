@@ -296,37 +296,46 @@ export function candidateToDecision(c: RescueCandidate, reasoning: string): Resc
 
 // ── LLM decision ──────────────────────────────────────────────────────────────
 
-/** OpenAI-compatible tool the model is forced to call — guarantees a parseable decision. */
-const DECISION_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
-  type: "function",
-  function: {
-    name: "submit_rescue_decision",
-    description:
-      "Choose the single rescue lever (which action, on which asset) that restores the position's health factor to target.",
-    parameters: {
-      type: "object",
-      properties: {
-        action: {
-          type: "string",
-          enum: ["repay", "supply"],
-          description:
-            "repay = pay down a borrowed debt asset (most capital-efficient, frees borrowing power). " +
-            "supply = add more of a collateral asset (keeps the debt open).",
+/**
+ * OpenAI-compatible tool the model is forced to call — guarantees a parseable
+ * decision. `strict` adds `additionalProperties: false` to the schema, which the
+ * Gemini free-tier OpenAI-compat endpoint requires (it rejects the tool call with
+ * `function_call_filter: MALFORMED_FUNCTION_CALL` otherwise). NVIDIA's endpoint
+ * accepts both.
+ */
+function decisionTool(strict: boolean): OpenAI.Chat.Completions.ChatCompletionTool {
+  return {
+    type: "function",
+    function: {
+      name: "submit_rescue_decision",
+      description:
+        "Choose the single rescue lever (which action, on which asset) that restores the position's health factor to target.",
+      parameters: {
+        type: "object",
+        ...(strict ? { additionalProperties: false } : {}),
+        properties: {
+          action: {
+            type: "string",
+            enum: ["repay", "supply"],
+            description:
+              "repay = pay down a borrowed debt asset (most capital-efficient, frees borrowing power). " +
+              "supply = add more of a collateral asset (keeps the debt open).",
+          },
+          assetSymbol: {
+            type: "string",
+            description:
+              "The token symbol to act on — MUST be one of the assets listed as an available option.",
+          },
+          reasoning: {
+            type: "string",
+            description: "One or two sentences: why this action on this asset for this position.",
+          },
         },
-        assetSymbol: {
-          type: "string",
-          description:
-            "The token symbol to act on — MUST be one of the assets listed as an available option.",
-        },
-        reasoning: {
-          type: "string",
-          description: "One or two sentences: why this action on this asset for this position.",
-        },
+        required: ["action", "assetSymbol", "reasoning"],
       },
-      required: ["action", "assetSymbol", "reasoning"],
     },
-  },
-};
+  };
+}
 
 export interface DecideInput {
   snapshot: PositionSnapshot;
@@ -336,6 +345,10 @@ export interface DecideInput {
   walletBalances?: Record<string, number>;
   model?: string;
   bufferBps?: number;
+  /** Hard per-attempt budget in ms. When it lapses, the request is aborted. */
+  timeoutMs?: number;
+  /** Gemini's OpenAI-compat needs `additionalProperties: false` in the tool schema. */
+  strictSchema?: boolean;
 }
 
 /**
@@ -400,13 +413,23 @@ export async function decideRescue(
 
   // Forcing the tool guarantees structured output. (Extended thinking isn't
   // compatible with a forced tool_choice; the arithmetic is deterministic above.)
-  const completion = await client.chat.completions.create({
-    model: input.model ?? "deepseek-ai/deepseek-v4-pro",
-    max_tokens: 1024,
-    tools: [DECISION_TOOL],
-    tool_choice: { type: "function", function: { name: DECISION_TOOL.function.name } },
-    messages: [{ role: "user", content: prompt }],
-  });
+  const strict = input.strictSchema ?? false;
+  const tool = decisionTool(strict);
+  const completion = await client.chat.completions.create(
+    {
+      model: input.model ?? "deepseek-ai/deepseek-v4-flash",
+      max_tokens: 1024,
+      tools: [tool],
+      // Gemini's OpenAI-compat doesn't accept the named-function tool_choice form
+      // (→ MALFORMED_FUNCTION_CALL); with a single tool, "required" is equivalent
+      // and works on both providers.
+      tool_choice: strict ? "required" : { type: "function", function: { name: tool.function.name } },
+      messages: [{ role: "user", content: prompt }],
+    },
+    // Hard per-attempt budget: abort the request if the provider is slow, so the
+    // caller (fallback chain) can move on quickly.
+    input.timeoutMs != null ? { signal: AbortSignal.timeout(input.timeoutMs) } : undefined,
+  );
 
   const toolCall = completion.choices[0]?.message.tool_calls?.[0];
   if (!toolCall?.function) throw new Error("Model did not return a rescue decision.");
@@ -427,6 +450,59 @@ export async function decideRescue(
     return decideRescueDeterministic(snapshot, hfTarget, input.bufferBps);
   }
   return candidateToDecision(picked, raw.reasoning.trim());
+}
+
+/** Which provider produced a decision, for logs/audit. */
+export interface DecisionSource {
+  provider: "nvidia" | "gemini" | "deterministic";
+  detail?: string;
+}
+
+/**
+ * Try the primary (NVIDIA) model first with a short per-attempt budget, then the
+ * Gemini free-tier fallback if configured, then the deterministic sizing. Each LLM
+ * attempt is aborted after `timeoutMs` so the Guardian stays fast even when a
+ * provider is slow or down. Never throws for a slow model — worst case is the
+ * deterministic fallback (the position is still protected).
+ */
+export async function decideRescueWithFallback(opts: {
+  primary: OpenAI;
+  /** Model id on the primary provider. */
+  primaryModel?: string;
+  /** Optional Gemini fallback client. When null, only primary → deterministic. */
+  gemini?: OpenAI;
+  geminiModel?: string;
+  /** Per-attempt budget in ms. */
+  timeoutMs?: number;
+  input: Omit<DecideInput, "model" | "timeoutMs"> & { model?: string };
+}): Promise<{ decision: RescueDecision; source: DecisionSource }> {
+  const { primary, gemini, timeoutMs } = opts;
+
+  // 1. Primary (NVIDIA).
+  try {
+    const decision = await decideRescue(primary, { ...opts.input, timeoutMs });
+    return { decision, source: { provider: "nvidia" } };
+  } catch (err) {
+    // Fall through to Gemini; keep the error for the audit trail.
+    if (!gemini) throw err;
+    const detail = err instanceof Error ? err.message : String(err);
+    console.log(`NVIDIA decision failed (${detail}); trying Gemini…`);
+  }
+
+  // 2. Gemini fallback (free tier, OpenAI-compatible endpoint). Gemini's OpenAI-compat
+  //    rejects non-strict schemas, so force `additionalProperties: false` here.
+  try {
+    const decision = await decideRescue(gemini, {
+      ...opts.input,
+      model: opts.geminiModel ?? "gemini-2.5-flash",
+      timeoutMs,
+      strictSchema: true,
+    });
+    return { decision, source: { provider: "gemini" } };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`Both NVIDIA and Gemini failed (${detail}); using deterministic sizing.`);
+  }
 }
 
 function fmt(n: number): string {

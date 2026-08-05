@@ -17,7 +17,7 @@
  * amounts, and tx links, and only acts on the record bound to a *verified* Telegram
  * user id.
  */
-import type OpenAI from "openai";
+import type { LlmConfig } from "../src/agent/guardian.js";
 import {
   buildSnapshot,
   executeRescue,
@@ -26,7 +26,7 @@ import {
 import {
   candidateToDecision,
   computeCandidates,
-  decideRescue,
+  decideRescueWithFallback,
   decideRescueDeterministic,
   type RescueCandidate,
 } from "../src/agent/decide.js";
@@ -39,8 +39,8 @@ const ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 export interface GuardianBotOptions {
   store: GuardianStore;
   botToken: string;
-  /** Operator-owned LLM client for the decision layer; null ⇒ deterministic fallback. */
-  llm: OpenAI | null;
+  /** Operator-owned LLM stack for the decision layer; null ⇒ deterministic fallback. */
+  llm: LlmConfig | null;
   webAppUrl: string;
   watchIntervalMs: number;
 }
@@ -48,7 +48,7 @@ export interface GuardianBotOptions {
 export class GuardianBot {
   private readonly tg: TelegramClient;
   private readonly store: GuardianStore;
-  private readonly llm: OpenAI | null;
+  private readonly llm: LlmConfig | null;
   private readonly webAppUrl: string;
   private readonly watchIntervalMs: number;
   private running = false;
@@ -356,13 +356,20 @@ export class GuardianBot {
 
     let recommendation = "";
     try {
-      const decision = this.llm
-        ? await decideRescue(this.llm, {
-            snapshot,
-            hfThreshold: record.hfThreshold,
-            hfTarget: record.hfTarget,
-          })
-        : decideRescueDeterministic(snapshot, record.hfTarget);
+      let decision;
+      if (this.llm) {
+        const r = await decideRescueWithFallback({
+          primary: this.llm.primary,
+          primaryModel: this.llm.primaryModel,
+          gemini: this.llm.gemini,
+          geminiModel: this.llm.geminiModel,
+          timeoutMs: this.llm.timeoutMs,
+          input: { snapshot, hfThreshold: record.hfThreshold, hfTarget: record.hfTarget },
+        });
+        decision = r.decision;
+      } else {
+        decision = decideRescueDeterministic(snapshot, record.hfTarget);
+      }
       recommendation = `\n🤖 Recommends: ${decision.action} ${fmt(decision.amountHuman)} ${decision.asset} — ${decision.reasoning}`;
     } catch {
       /* recommendation is best-effort; buttons still work without it */

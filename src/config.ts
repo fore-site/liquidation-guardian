@@ -22,15 +22,29 @@ function optional(name: string, fallback: string): string {
 
 export interface GuardianConfig {
   keeperHubApiKey: string;
-  /** NVIDIA NIM API key for the LLM decision layer (https://integrate.api.nvidia.com). */
+  /** NVIDIA NIM API key for the primary LLM decision layer (https://integrate.api.nvidia.com). */
   nvidiaApiKey: string;
   /**
    * Optional OpenAI-compatible base URL (NVIDIA's hosted suite or a router/proxy in
    * front of the models). Empty string ⇒ use the OpenAI SDK default (api.openai.com).
    */
   openaiBaseUrl: string;
-  /** Model id served by the base URL (NVIDIA NIM catalog, e.g. deepseek-ai/deepseek-v3.1). */
+  /** Model id served by the base URL (NVIDIA NIM catalog, e.g. deepseek-ai/deepseek-v4-flash). */
   llmModel: string;
+  /**
+   * Optional Gemini free-tier fallback (OpenAI-compatible endpoint). When set, the
+   * decision layer tries the primary model first and falls back to Gemini if the
+   * primary doesn't respond within {@link llmTimeoutMs}.
+   */
+  geminiApiKey: string;
+  /** Model id on the Gemini fallback (e.g. gemini-2.5-flash on the free tier). */
+  geminiModel: string;
+  /**
+   * Per-attempt LLM timeout in ms. Kept short so the Guardian stays fast — if a
+   * model doesn't answer in time we move on (to the fallback, then to the
+   * deterministic sizing).
+   */
+  llmTimeoutMs: number;
   chainId: string;
   walletAddress: string;
   /** Health factor below which the Guardian acts. */
@@ -71,7 +85,12 @@ export function loadConfig(opts: { requireLlm?: boolean } = {}): GuardianConfig 
     // OpenAI-compatible router in front of the LLM: accept BASE_URL (this project's
     // name) or the SDK's own OPENAI_BASE_URL. Passed explicitly to the client below.
     openaiBaseUrl: optional("BASE_URL", optional("OPENAI_BASE_URL", "")),
-    llmModel: optional("LLM_MODEL", "deepseek-ai/deepseek-v4-pro"),
+    llmModel: optional("LLM_MODEL", "deepseek-ai/deepseek-v4-flash"),
+    // Optional Gemini free-tier fallback (OpenAI-compatible endpoint). Empty ⇒ no fallback.
+    geminiApiKey: optional("GEMINI_API_KEY", ""),
+    geminiModel: optional("GEMINI_MODEL", "gemini-2.5-flash"),
+    // Short per-attempt budget so the Guardian stays fast and falls back quickly.
+    llmTimeoutMs: Number(optional("LLM_TIMEOUT_MS", "15000")),
     chainId: optional("CHAIN_ID", "11155111"),
     walletAddress: required("WALLET_ADDRESS"),
     hfThreshold: Number(optional("HEALTH_FACTOR_THRESHOLD", "1.15")),
