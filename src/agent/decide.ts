@@ -27,7 +27,7 @@
  * LINK/LINK — one asset per side — so it makes zero oracle calls, and the math is
  * exact. See docs/ARCHITECTURE.md ("Multi-asset sizing") and docs/TEARDOWN.md (F5).
  */
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
 const WAD = 10n ** 18n;
 
@@ -296,32 +296,35 @@ export function candidateToDecision(c: RescueCandidate, reasoning: string): Resc
 
 // ── LLM decision ──────────────────────────────────────────────────────────────
 
-/** JSON-schema tool the model is forced to call — guarantees a parseable decision. */
-const DECISION_TOOL: Anthropic.Tool = {
-  name: "submit_rescue_decision",
-  description:
-    "Choose the single rescue lever (which action, on which asset) that restores the position's health factor to target.",
-  input_schema: {
-    type: "object",
-    properties: {
-      action: {
-        type: "string",
-        enum: ["repay", "supply"],
-        description:
-          "repay = pay down a borrowed debt asset (most capital-efficient, frees borrowing power). " +
-          "supply = add more of a collateral asset (keeps the debt open).",
+/** OpenAI-compatible tool the model is forced to call — guarantees a parseable decision. */
+const DECISION_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
+  type: "function",
+  function: {
+    name: "submit_rescue_decision",
+    description:
+      "Choose the single rescue lever (which action, on which asset) that restores the position's health factor to target.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["repay", "supply"],
+          description:
+            "repay = pay down a borrowed debt asset (most capital-efficient, frees borrowing power). " +
+            "supply = add more of a collateral asset (keeps the debt open).",
+        },
+        assetSymbol: {
+          type: "string",
+          description:
+            "The token symbol to act on — MUST be one of the assets listed as an available option.",
+        },
+        reasoning: {
+          type: "string",
+          description: "One or two sentences: why this action on this asset for this position.",
+        },
       },
-      assetSymbol: {
-        type: "string",
-        description:
-          "The token symbol to act on — MUST be one of the assets listed as an available option.",
-      },
-      reasoning: {
-        type: "string",
-        description: "One or two sentences: why this action on this asset for this position.",
-      },
+      required: ["action", "assetSymbol", "reasoning"],
     },
-    required: ["action", "assetSymbol", "reasoning"],
   },
 };
 
@@ -336,13 +339,14 @@ export interface DecideInput {
 }
 
 /**
- * Ask Claude to pick the rescue lever. Amounts are computed here (not by the model);
- * the model picks the action + asset among the sized, available options and explains
- * it. Falls back to {@link decideRescueDeterministic} if the model picks something
- * unavailable. Returns a structured, code-sized {@link RescueDecision}.
+ * Ask the hosted LLM (NVIDIA NIM / OpenAI-compatible endpoint) to pick the rescue
+ * lever. Amounts are computed here (not by the model); the model picks the action +
+ * asset among the sized, available options and explains it. Falls back to
+ * {@link decideRescueDeterministic} if the model picks something unavailable.
+ * Returns a structured, code-sized {@link RescueDecision}.
  */
 export async function decideRescue(
-  client: Anthropic,
+  client: OpenAI,
   input: DecideInput,
 ): Promise<RescueDecision> {
   const { snapshot, hfThreshold, hfTarget } = input;
@@ -396,19 +400,21 @@ export async function decideRescue(
 
   // Forcing the tool guarantees structured output. (Extended thinking isn't
   // compatible with a forced tool_choice; the arithmetic is deterministic above.)
-  const message = await client.messages.create({
-    model: input.model ?? "claude-opus-5",
+  const completion = await client.chat.completions.create({
+    model: input.model ?? "deepseek-ai/deepseek-v4-pro",
     max_tokens: 1024,
     tools: [DECISION_TOOL],
-    tool_choice: { type: "tool", name: DECISION_TOOL.name },
+    tool_choice: { type: "function", function: { name: DECISION_TOOL.function.name } },
     messages: [{ role: "user", content: prompt }],
   });
 
-  const toolUse = message.content.find(
-    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
-  );
-  if (!toolUse) throw new Error("Model did not return a rescue decision.");
-  const raw = toolUse.input as { action: "repay" | "supply"; assetSymbol: string; reasoning: string };
+  const toolCall = completion.choices[0]?.message.tool_calls?.[0];
+  if (!toolCall?.function) throw new Error("Model did not return a rescue decision.");
+  const raw = JSON.parse(toolCall.function.arguments) as {
+    action: "repay" | "supply";
+    assetSymbol: string;
+    reasoning: string;
+  };
 
   const wantAction = raw.action === "supply" ? "supply" : "repay";
   const wantSymbol = (raw.assetSymbol ?? "").trim().toUpperCase();

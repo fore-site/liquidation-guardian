@@ -17,7 +17,7 @@
  * amounts, and tx links, and only acts on the record bound to a *verified* Telegram
  * user id.
  */
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import {
   buildSnapshot,
   executeRescue,
@@ -40,7 +40,7 @@ export interface GuardianBotOptions {
   store: GuardianStore;
   botToken: string;
   /** Operator-owned LLM client for the decision layer; null ⇒ deterministic fallback. */
-  anthropic: Anthropic | null;
+  llm: OpenAI | null;
   webAppUrl: string;
   watchIntervalMs: number;
 }
@@ -48,7 +48,7 @@ export interface GuardianBotOptions {
 export class GuardianBot {
   private readonly tg: TelegramClient;
   private readonly store: GuardianStore;
-  private readonly anthropic: Anthropic | null;
+  private readonly llm: OpenAI | null;
   private readonly webAppUrl: string;
   private readonly watchIntervalMs: number;
   private running = false;
@@ -57,7 +57,7 @@ export class GuardianBot {
   constructor(opts: GuardianBotOptions) {
     this.tg = new TelegramClient(opts.botToken);
     this.store = opts.store;
-    this.anthropic = opts.anthropic;
+    this.llm = opts.llm;
     this.webAppUrl = opts.webAppUrl;
     this.watchIntervalMs = opts.watchIntervalMs;
   }
@@ -338,7 +338,7 @@ export class GuardianBot {
       await this.store.markAlerted(record.id); // mark before acting to avoid a double-fire
       const result = await runGuardianOnce({
         keeperHub: kh,
-        anthropic: this.anthropic,
+        llm: this.llm,
         chainId: record.chainId,
         user: record.wallet,
         hfThreshold: record.hfThreshold,
@@ -356,8 +356,8 @@ export class GuardianBot {
 
     let recommendation = "";
     try {
-      const decision = this.anthropic
-        ? await decideRescue(this.anthropic, {
+      const decision = this.llm
+        ? await decideRescue(this.llm, {
             snapshot,
             hfThreshold: record.hfThreshold,
             hfTarget: record.hfTarget,

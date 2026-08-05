@@ -15,7 +15,7 @@
  *       npm run guardian -- --dry-run   (decide + simulate only)
  */
 import "../net.js"; // patient IPv6→IPv4 failover; must run before any fetch
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { loadConfig } from "../config.js";
 import { KeeperHub, type AavePosition } from "../keeperhub.js";
 import {
@@ -41,7 +41,7 @@ export interface GuardianResult {
 export async function runGuardianOnce(opts: {
   keeperHub: KeeperHub;
   /** LLM client for the decision. If null, a deterministic fallback is used. */
-  anthropic: Anthropic | null;
+  llm: OpenAI | null;
   chainId: string;
   user: string;
   hfThreshold: number;
@@ -52,7 +52,7 @@ export async function runGuardianOnce(opts: {
   /** When true, stop after a clean simulation — don't broadcast. */
   dryRun?: boolean;
 }): Promise<GuardianResult> {
-  const { keeperHub, anthropic, chainId, user, hfThreshold, hfTarget } = opts;
+  const { keeperHub, llm, chainId, user, hfThreshold, hfTarget } = opts;
 
   // 1. Read the live position.
   const position = await keeperHub.readAavePosition(chainId, user);
@@ -84,10 +84,10 @@ export async function runGuardianOnce(opts: {
   //    Use the LLM when available; fall back to deterministic sizing if not, so
   //    the position stays protected even when the LLM is unreachable.
   let decision: RescueDecision;
-  if (anthropic) {
+  if (llm) {
     log("⚠️  Below threshold — asking the decision layer for the fix…");
     try {
-      decision = await decideRescue(anthropic, { snapshot, hfThreshold, hfTarget });
+      decision = await decideRescue(llm, { snapshot, hfThreshold, hfTarget });
     } catch (err) {
       log(`LLM decision failed (${err instanceof Error ? err.message : err}); using deterministic fallback.`);
       decision = decideRescueDeterministic(snapshot, hfTarget);
@@ -271,26 +271,27 @@ function log(msg: string): void {
 
 // ── CLI entrypoint ──────────────────────────────────────────────────────────
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const cfg = loadConfig(); // Anthropic key optional — deterministic fallback if absent.
+  const cfg = loadConfig(); // LLM key optional — deterministic fallback if absent.
   const keeperHub = new KeeperHub({ apiKey: cfg.keeperHubApiKey });
-  const anthropic = cfg.anthropicApiKey
-    ? new Anthropic({
-        apiKey: cfg.anthropicApiKey,
-        // Route through a proxy/router when BASE_URL is set; else SDK default.
-        ...(cfg.anthropicBaseUrl ? { baseURL: cfg.anthropicBaseUrl } : {}),
+  const llm = cfg.nvidiaApiKey
+    ? new OpenAI({
+        apiKey: cfg.nvidiaApiKey,
+        // Route through the NVIDIA NIM endpoint (or another OpenAI-compatible
+        // gateway) when BASE_URL is set; else the OpenAI SDK default.
+        ...(cfg.openaiBaseUrl ? { baseURL: cfg.openaiBaseUrl } : {}),
       })
     : null;
-  if (anthropic && cfg.anthropicBaseUrl) {
-    console.log(`(Using Anthropic router at ${cfg.anthropicBaseUrl})`);
+  if (llm && cfg.openaiBaseUrl) {
+    console.log(`(Using OpenAI-compatible LLM router at ${cfg.openaiBaseUrl})`);
   }
-  if (!anthropic) {
-    console.log("(No ANTHROPIC_API_KEY set — running with the deterministic fallback decision.)");
+  if (!llm) {
+    console.log("(No NVIDIA_API_KEY set — running with the deterministic fallback decision.)");
   }
   const dryRun = process.argv.includes("--dry-run");
 
   runGuardianOnce({
     keeperHub,
-    anthropic,
+    llm,
     chainId: cfg.chainId,
     user: cfg.walletAddress,
     hfThreshold: cfg.hfThreshold,

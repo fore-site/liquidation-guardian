@@ -21,3 +21,5 @@ npm-debug.log*
 
 # Playwright smoke-test artifacts
 .playwright-mcp/
+
+hackathon_brief.txt

@@ -26,7 +26,7 @@ import "../src/net.js"; // patient IPv6→IPv4 failover; must run before any fet
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { loadServerConfig } from "../src/config.js";
 import { buildSnapshot } from "../src/agent/guardian.js";
 import { computeCandidates, type AssetPosition, type RescueCandidate } from "../src/agent/decide.js";
@@ -41,11 +41,11 @@ const WEB_DIST = join(process.cwd(), "web", "dist");
 const cfg = loadServerConfig();
 const store = new GuardianStore({ redisUrl: cfg.redisUrl, masterKeyHex: cfg.guardianMasterKey });
 // Optional operator-owned LLM client for the decision layer (shared across users).
-const anthropicKey = process.env.ANTHROPIC_API_KEY;
-const anthropic =
-  anthropicKey && !anthropicKey.includes("your_")
-    ? new Anthropic({
-        apiKey: anthropicKey,
+const llmKey = process.env.NVIDIA_API_KEY;
+const llm =
+  llmKey && !llmKey.includes("your_")
+    ? new OpenAI({
+        apiKey: llmKey,
         ...(process.env.BASE_URL && !process.env.BASE_URL.includes("your_")
           ? { baseURL: process.env.BASE_URL }
           : {}),
@@ -362,7 +362,7 @@ async function main(): Promise<void> {
     bot = new GuardianBot({
       store,
       botToken: cfg.telegramBotToken,
-      anthropic,
+      llm,
       webAppUrl: cfg.webAppUrl,
       watchIntervalMs: cfg.watchIntervalMs,
     });

@@ -34,7 +34,7 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
                                  ▼  handoff (HTTP webhook on Pro,
                                  ▼   out-of-band trigger on free)
    engages only when     ┌─────────────────────────────────────────────┐
-   there's a real        │  LLM Decision Layer  (Claude)                │
+   there's a real        │  LLM Decision Layer  (NVIDIA NIM / OpenAI)   │
    decision to make      │                                              │
                         │  Inputs: HF, collateral, debt, wallet        │
                         │  balances, gas cost of each option           │

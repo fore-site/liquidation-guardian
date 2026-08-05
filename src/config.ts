@@ -22,12 +22,15 @@ function optional(name: string, fallback: string): string {
 
 export interface GuardianConfig {
   keeperHubApiKey: string;
-  anthropicApiKey: string;
+  /** NVIDIA NIM API key for the LLM decision layer (https://integrate.api.nvidia.com). */
+  nvidiaApiKey: string;
   /**
-   * Optional Anthropic-compatible base URL (a router/proxy in front of the
-   * models). Empty string ⇒ use the SDK default (api.anthropic.com).
+   * Optional OpenAI-compatible base URL (NVIDIA's hosted suite or a router/proxy in
+   * front of the models). Empty string ⇒ use the OpenAI SDK default (api.openai.com).
    */
-  anthropicBaseUrl: string;
+  openaiBaseUrl: string;
+  /** Model id served by the base URL (NVIDIA NIM catalog, e.g. deepseek-ai/deepseek-v3.1). */
+  llmModel: string;
   chainId: string;
   walletAddress: string;
   /** Health factor below which the Guardian acts. */
@@ -58,16 +61,17 @@ export interface GuardianConfig {
   watchIntervalMs: number;
 }
 
-export function loadConfig(opts: { requireAnthropic?: boolean } = {}): GuardianConfig {
+export function loadConfig(opts: { requireLlm?: boolean } = {}): GuardianConfig {
   return {
     keeperHubApiKey: required("KEEPERHUB_API_KEY"),
     // The LLM key is only needed for the decision layer, not for read/first-tx scripts.
-    anthropicApiKey: opts.requireAnthropic
-      ? required("ANTHROPIC_API_KEY")
-      : optional("ANTHROPIC_API_KEY", ""),
-    // Router in front of Anthropic: accept BASE_URL (this project's name) or the
-    // SDK's own ANTHROPIC_BASE_URL. Passed explicitly to the client below.
-    anthropicBaseUrl: optional("BASE_URL", optional("ANTHROPIC_BASE_URL", "")),
+    nvidiaApiKey: opts.requireLlm
+      ? required("NVIDIA_API_KEY")
+      : optional("NVIDIA_API_KEY", ""),
+    // OpenAI-compatible router in front of the LLM: accept BASE_URL (this project's
+    // name) or the SDK's own OPENAI_BASE_URL. Passed explicitly to the client below.
+    openaiBaseUrl: optional("BASE_URL", optional("OPENAI_BASE_URL", "")),
+    llmModel: optional("LLM_MODEL", "deepseek-ai/deepseek-v4-pro"),
     chainId: optional("CHAIN_ID", "11155111"),
     walletAddress: required("WALLET_ADDRESS"),
     hfThreshold: Number(optional("HEALTH_FACTOR_THRESHOLD", "1.15")),

@@ -26,7 +26,7 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Root node_modules include tsx + runtime deps (@anthropic-ai/sdk, redis, dotenv).
+# Root node_modules include tsx + runtime deps (openai, redis, dotenv).
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
