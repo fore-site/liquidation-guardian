@@ -77,7 +77,7 @@ export async function getRescues(user: string): Promise<RescueEvent[]> {
   return events.sort((a, b) => b.block - a.block);
 }
 
-interface RawLog {
+export interface RawLog {
   topics: string[];
   data: string;
   transactionHash: string;
@@ -140,7 +140,7 @@ function decodeLog(log: RawLog, type: "repay" | "supply"): RescueEvent | null {
 }
 
 /** Minimal JSON-RPC POST. Throws on RPC-level errors. */
-async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
+export async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
   const res = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -143,6 +143,32 @@ Two deploy-time realities shaped it (TEARDOWN F11):
   in-workflow webhook once on Pro. Either way, KeeperHub still owns the watch, the branch, and the
   execution — only the workflow→Guardian hop moves outside on the free tier.
 
+## The event-driven watcher (the reactive trigger)
+
+Alongside the scheduled workflow and the bot's watch loop, the server runs an **event-driven
+watcher** (`server/event-watcher.ts`): it polls the Aave Pool's logs for the events that actually
+move a position's health factor — `Supply`, `Repay`, `Borrow`, `Withdraw`, `LiquidationCall`, and
+(oracle price updates) `ReserveDataUpdated` — and re-checks the affected positions immediately.
+
+This is the difference between *reacting to the chain* and *waiting for the clock*: a relevant
+event (a big withdraw, a liquidation, an oracle move) triggers a KeeperHub re-read of every stored
+position within ~1 block of the change, instead of up to `WATCH_INTERVAL_MS` (60s) for the bot loop
+or `*/10` minutes for the workflow. The topic hashes are keccak256 of the canonical Aave v3 Pool
+event signatures, cross-verified against live Sepolia logs.
+
+Layering (belt and suspenders, matching the reliability story):
+
+1. **Event-driven watcher** — the fast reactive layer; reacts within ~1 block.
+2. **Bot watch loop** — the deterministic backup; re-reads every position on a schedule.
+3. **KeeperHub workflow** — the platform-surface "watches" half (the KeeperHub surface a judge sees).
+
+The price-event topic (`ReserveDataUpdated`) fires constantly (oracle heartbeats), so it is
+**throttled** (`PRICE_EVENT_THROTTLE_MS`, default 30s) — it only triggers a re-check if no other
+event has fired within the window. Per-position re-reads are coalesced (`MIN_RE_READ_MS`, default
+15s) so an event burst never hammers KeeperHub's rate limit. The watcher never executes anything
+itself — it only *fires the existing check path sooner* (`bot.runCheck`), so the decision and
+execution pipeline is unchanged.
+
 ## Execution safety: simulate before broadcast
 
 Every write goes through KeeperHub's `simulate: true` preflight first. Only if the result is

@@ -328,14 +328,19 @@ export class GuardianBot {
       // Only watch records with a chat to notify.
       if (record.telegramChatId == null) continue;
       try {
-        await this.checkOne(record);
+        await this.runCheck(record);
       } catch (e) {
         console.error(`[bot] check ${short(record.wallet)}:`, e instanceof Error ? e.message : e);
       }
     }
   }
 
-  private async checkOne(record: GuardianRecord): Promise<void> {
+  /**
+   * Run the full per-record check: read HF → below threshold? → de-dupe →
+   * auto-rescue (agentic loop) or approval buttons. Shared by the watch loop and
+   * the event-driven watcher — the only difference is *when* it's called.
+   */
+  async runCheck(record: GuardianRecord): Promise<void> {
     const chatId = record.telegramChatId!;
     const kh = this.store.keeperHubFor(record);
     const pos = await kh.readAavePosition(record.chainId, record.wallet);

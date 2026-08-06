@@ -31,12 +31,22 @@ import { loadServerConfig } from "../src/config.js";
 import { buildSnapshot, type LlmConfig } from "../src/agent/guardian.js";
 import { computeCandidates, type AssetPosition, type RescueCandidate } from "../src/agent/decide.js";
 import { getRescues } from "./rescues.js";
+import { EventWatcher } from "./event-watcher.js";
 import { GuardianStore, publicRecord, type GuardianRecord } from "./store.js";
 import { verifyInitData } from "./verifyInitData.js";
 import { GuardianBot } from "./bot.js";
 
 const PORT = Number(process.env.DASHBOARD_PORT || 8787);
 const WEB_DIST = join(process.cwd(), "web", "dist");
+
+// Crash-fate isolation: swallow unhandled promise rejections (a stray async
+// failure in the bot/API must not kill the process — the watcher and watch loop
+// keep running). Hard exceptions (uncaughtException) are left to crash so an
+// external supervisor (systemd/docker --restart/pm2) restarts a truly wedged
+// process.
+process.on("unhandledRejection", (reason) => {
+  console.error("[serve] unhandled rejection (swallowed):", reason instanceof Error ? reason.message : reason);
+});
 
 const cfg = loadServerConfig();
 const store = new GuardianStore({ redisUrl: cfg.redisUrl, masterKeyHex: cfg.guardianMasterKey });
@@ -412,6 +422,23 @@ async function main(): Promise<void> {
     await bot.start();
   } else {
     console.log("(No TELEGRAM_BOT_TOKEN — running as the HTTP dashboard only.)");
+  }
+
+  // Event-driven watcher — the reactive trigger. Reacts to Aave Pool events
+  // within ~1 block instead of waiting for the next poll tick; the bot watch
+  // loop + KeeperHub workflow remain as deterministic backup.
+  if (process.env.EVENT_WATCH_ENABLED !== "false" && bot) {
+    const watcher = new EventWatcher({
+      store,
+      rpcUrl: process.env.SEPOLIA_RPC_URL?.trim() || "https://ethereum-sepolia.publicnode.com",
+      pollMs: Number(process.env.EVENT_POLL_MS || 5000),
+      minReReadMs: Number(process.env.MIN_RE_READ_MS || 15000),
+      priceThrottleMs: Number(process.env.PRICE_EVENT_THROTTLE_MS || 30000),
+      onPositionEvent: (record) => bot!.runCheck(record),
+    });
+    watcher.start();
+  } else {
+    console.log("(Event watcher disabled — no bot, or EVENT_WATCH_ENABLED=false.)");
   }
 
   // Health-check route already reflects store readiness.
