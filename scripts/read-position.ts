@@ -16,7 +16,7 @@ import { buildSnapshot } from "../src/agent/guardian.js";
 import { computeCandidates } from "../src/agent/decide.js";
 
 async function main(): Promise<void> {
-  const cfg = loadConfig(); // Anthropic key not required for a read.
+  const cfg = loadConfig(); // LLM keys not required for a read.
   const keeperHub = new KeeperHub({ apiKey: cfg.keeperHubApiKey });
 
   const pos = await keeperHub.readAavePosition(cfg.chainId, cfg.walletAddress);

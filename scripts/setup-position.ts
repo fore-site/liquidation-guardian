@@ -29,7 +29,11 @@ import { SEPOLIA_POOL, SEPOLIA_FAUCET, SEPOLIA_RESERVES, VARIABLE_RATE_MODE, toB
 
 const LINK = SEPOLIA_RESERVES.LINK;
 const SUPPLY_LINK = 100; // collateral to supply
-const MINT_LINK = 200; // mint extra so the wallet can also repay
+// The rescue repays from the wallet, so the mint + Pool approval must cover the
+// collateral (transferred out at supply) AND the wallet balance the rescue repays
+// from. With HF ~1.0 and target 1.5 the repay is ~⅓ of debt; 300 leaves a margin.
+const MINT_LINK = 300; // faucet-mint: collateral + rescue-repay buffer
+const APPROVE_LINK = MINT_LINK; // pool allowance covers supply + rescue repay
 const BORROW_FRACTION = 0.97; // borrow 97% of capacity → low HF, below threshold
 
 const cfg = loadConfig();
@@ -49,12 +53,12 @@ async function main(): Promise<void> {
     functionArgs: JSON.stringify([LINK.address, user, toBaseUnits(LINK, MINT_LINK)]),
   });
 
-  // 2. Approve the pool to pull our LINK (cover supply + repay).
+  // 2. Approve the pool to pull our LINK (cover supply + the later rescue repay).
   await step("Approve Pool for LINK", "contract-call", {
     chainId,
     contractAddress: LINK.address,
     functionName: "approve",
-    functionArgs: JSON.stringify([SEPOLIA_POOL, toBaseUnits(LINK, MINT_LINK)]),
+    functionArgs: JSON.stringify([SEPOLIA_POOL, toBaseUnits(LINK, APPROVE_LINK)]),
   });
 
   // 3. Supply LINK as collateral.

@@ -26,7 +26,7 @@ import {
   type PositionSnapshot,
   type RescueDecision,
 } from "./decide.js";
-import { SEPOLIA_RESERVES, VARIABLE_RATE_MODE, type ReserveInfo } from "./assets.js";
+import { SEPOLIA_POOL, SEPOLIA_RESERVES, VARIABLE_RATE_MODE, type ReserveInfo } from "./assets.js";
 import { readPriceUsd } from "./prices.js";
 
 const logger = createLogger("guardian");
@@ -44,14 +44,14 @@ export interface GuardianResult {
   detail?: string;
 }
 
-/** LLM stack for the decision layer: primary + optional Gemini fallback + timeout. */
+/** LLM stack for the decision layer: primary + optional fallback + timeout. */
 export interface LlmConfig {
   primary: OpenAI;
-  /** Model id on the primary provider (e.g. NVIDIA's catalog). */
+  /** Model id on the primary provider (Gemini). */
   primaryModel?: string;
-  /** Optional Gemini free-tier fallback (OpenAI-compatible endpoint). */
-  gemini?: OpenAI;
-  geminiModel?: string;
+  /** Optional NVIDIA NIM fallback (OpenAI-compatible endpoint). */
+  fallback?: OpenAI;
+  fallbackModel?: string;
   /** Per-attempt budget in ms. */
   timeoutMs?: number;
 }
@@ -109,8 +109,8 @@ export async function runGuardianOnce(opts: {
       const { decision: d, source } = await decideRescueWithFallback({
         primary: llm.primary,
         primaryModel: llm.primaryModel,
-        gemini: llm.gemini,
-        geminiModel: llm.geminiModel,
+        fallback: llm.fallback,
+        fallbackModel: llm.fallbackModel,
         timeoutMs: llm.timeoutMs,
         input: { snapshot, hfThreshold, hfTarget },
       });
@@ -299,6 +299,21 @@ export async function buildSnapshot(
     );
   }
 
+  // Executability data: wallet balance + Aave Pool allowance for every asset in
+  // the position. Levers are only offered when these cover the sized amount, so
+  // the LLM/fallback never pick a rescue that would fail at simulate with
+  // "transfer amount exceeds allowance". Reads degrade gracefully (0n on failure).
+  const walletBalances: Record<string, bigint> = {};
+  const allowances: Record<string, bigint> = {};
+  const positionAssets = [...debts, ...collaterals];
+  await Promise.all(
+    positionAssets.map(async (a) => {
+      const symbol = a.symbol.toUpperCase();
+      walletBalances[symbol] = await keeperHub.readErc20(chainId, a.address, "balanceOf", user);
+      allowances[symbol] = await keeperHub.readErc20(chainId, a.address, "allowance", user, SEPOLIA_POOL);
+    }),
+  );
+
   return {
     healthFactor: position.healthFactor,
     totalDebtUsd: position.totalDebtUsd,
@@ -306,6 +321,8 @@ export async function buildSnapshot(
     aggregateLiqThreshold: position.liquidationThreshold,
     debts,
     collaterals,
+    walletBalances,
+    allowances,
   };
 }
 
@@ -324,34 +341,34 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const cfg = loadConfig(); // LLM keys optional — deterministic fallback if absent.
   const keeperHub = new KeeperHub({ apiKey: cfg.keeperHubApiKey });
 
-  // Primary LLM: NVIDIA NIM (OpenAI-compatible endpoint).
-  const llm: LlmConfig | null = cfg.nvidiaApiKey
+  // Primary LLM: Gemini (OpenAI-compatible endpoint — fast, reliable).
+  const llm: LlmConfig | null = cfg.geminiApiKey
     ? {
         primary: new OpenAI({
-          apiKey: cfg.nvidiaApiKey,
-          // Route through the NVIDIA NIM endpoint (or another OpenAI-compatible
-          // gateway) when BASE_URL is set; else the OpenAI SDK default.
-          ...(cfg.openaiBaseUrl ? { baseURL: cfg.openaiBaseUrl } : {}),
+          apiKey: cfg.geminiApiKey,
+          baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
         }),
-        primaryModel: cfg.llmModel,
+        primaryModel: cfg.geminiModel,
         timeoutMs: cfg.llmTimeoutMs,
-        // Optional Gemini free-tier fallback (OpenAI-compatible endpoint).
-        ...(cfg.geminiApiKey
+        // Optional NVIDIA NIM fallback (OpenAI-compatible endpoint).
+        ...(cfg.nvidiaApiKey
           ? {
-              gemini: new OpenAI({
-                apiKey: cfg.geminiApiKey,
-                baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+              fallback: new OpenAI({
+                apiKey: cfg.nvidiaApiKey,
+                // Route through the NVIDIA NIM endpoint (or another OpenAI-compatible
+                // gateway) when BASE_URL is set; else the OpenAI SDK default.
+                ...(cfg.openaiBaseUrl ? { baseURL: cfg.openaiBaseUrl } : {}),
               }),
-              geminiModel: cfg.geminiModel,
+              fallbackModel: cfg.llmModel,
             }
           : {}),
       }
     : null;
 
   if (llm) {
-    console.log(`(LLM: ${cfg.llmModel} via ${cfg.openaiBaseUrl || "OpenAI SDK default"}${cfg.geminiApiKey ? " · Gemini fallback" : ""}, ${cfg.llmTimeoutMs}ms budget)`);
+    console.log(`(LLM: ${cfg.geminiModel} via Gemini${cfg.nvidiaApiKey ? ` · NVIDIA fallback (${cfg.llmModel})` : ""}, ${cfg.llmTimeoutMs}ms budget)`);
   } else {
-    console.log("(No NVIDIA_API_KEY set — running with the deterministic fallback decision.)");
+    console.log("(No GEMINI_API_KEY set — running with the deterministic fallback decision.)");
   }
   const dryRun = process.argv.includes("--dry-run");
 

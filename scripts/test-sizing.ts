@@ -186,6 +186,84 @@ console.log("\nCase D — USDC+DAI debt, WETH collateral (multi-debt repay):");
   check("all 3 levers enumerated as available", avail === 3, `${avail}/3`);
 }
 
+// ── Case E: executability gate — wallet balance + Pool allowance ──────────────
+console.log("\nCase E — wallet balance + Pool allowance gate lever availability:");
+{
+  const hf = 1.1;
+  const target = 1.5;
+  const debtTokens = units(100, 18); // LINK debt
+  const collTokens = units(200, 18); // LINK collateral
+  const linkDebt = asset("LINK", 18, debtTokens, { liqThresholdBps: 7500 });
+  const linkColl = asset("LINK", 18, collTokens, { liqThresholdBps: 7500 });
+
+  const base: PositionSnapshot = {
+    healthFactor: hf,
+    totalDebtUsd: 1000,
+    totalCollateralUsd: 2000,
+    aggregateLiqThreshold: 0.75,
+    debts: [linkDebt],
+    collaterals: [linkColl],
+  };
+
+  // 1. Without balance maps → math-only sizing, lever available (legacy path).
+  const legacy = computeCandidates(base, target, 0);
+  const legacyRepay = legacy.find((c) => c.action === "repay")!;
+  check("no balance maps → lever available (legacy)", legacyRepay.available && !legacyRepay.note);
+
+  // 2. Wallet balance insufficient → repay unavailable with a clear note.
+  const starved: PositionSnapshot = {
+    ...base,
+    walletBalances: { LINK: units(5, 18) }, // holds 5 LINK, repay needs ~26.7
+    allowances: { LINK: units(1000, 18) }, // plenty of allowance
+  };
+  const starvedCands = computeCandidates(starved, target, 0);
+  const starvedRepay = starvedCands.find((c) => c.action === "repay")!;
+  check(
+    "balance < amount → repay unavailable",
+    !starvedRepay.available && /wallet holds/.test(starvedRepay.note ?? ""),
+    starvedRepay.note ?? "",
+  );
+  const starvedSupply = starvedCands.find((c) => c.action === "supply")!;
+  check("supply also gated (needs ~33.3, holds 5) → unavailable", !starvedSupply.available, starvedSupply.note ?? "");
+
+  // 3. Enough balance but zero allowance → still unavailable.
+  const noAllow: PositionSnapshot = {
+    ...base,
+    walletBalances: { LINK: units(1000, 18) },
+    allowances: { LINK: 0n },
+  };
+  const noAllowCands = computeCandidates(noAllow, target, 0);
+  const noAllowRepay = noAllowCands.find((c) => c.action === "repay")!;
+  check(
+    "allowance < amount → repay unavailable",
+    !noAllowRepay.available && /allowance/.test(noAllowRepay.note ?? ""),
+    noAllowRepay.note ?? "",
+  );
+
+  // 4. Balance AND allowance both cover → available again.
+  const funded: PositionSnapshot = {
+    ...base,
+    walletBalances: { LINK: units(1000, 18) },
+    allowances: { LINK: units(1000, 18) },
+  };
+  const fundedCands = computeCandidates(funded, target, 0);
+  const fundedRepay = fundedCands.find((c) => c.action === "repay")!;
+  check("balance + allowance cover → repay available", fundedRepay.available && !fundedRepay.note);
+
+  // 5. Deterministic fallback must NOT pick an unexecutable lever — it throws
+  //    "no available lever" when every lever is gated off, rather than offering a
+  //    rescue that would fail at simulate.
+  const starvedDec = threw(() => decideRescueDeterministic(starved, target, 0));
+  check("deterministic refuses gated-off levers", starvedDec);
+
+  // 6. Deterministic picks the repay when funded (same rule as Case A).
+  const fundedDec = decideRescueDeterministic(funded, target, 0);
+  check(
+    "deterministic picks repay when funded",
+    fundedDec.action === "repay" && fundedDec.asset === "LINK",
+  );
+}
+
 console.log(`\n${failures === 0 ? "✅ all sizing checks passed" : `❌ ${failures} check(s) failed`}\n`);
 
 // ── Live KeeperHub dry-run (best-effort; soft — the unit checks are the hard gate) ─

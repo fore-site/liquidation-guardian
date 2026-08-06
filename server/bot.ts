@@ -387,8 +387,8 @@ export class GuardianBot {
         const r = await decideRescueWithFallback({
           primary: this.llm.primary,
           primaryModel: this.llm.primaryModel,
-          gemini: this.llm.gemini,
-          geminiModel: this.llm.geminiModel,
+          fallback: this.llm.fallback,
+          fallbackModel: this.llm.fallbackModel,
           timeoutMs: this.llm.timeoutMs,
           input: { snapshot, hfThreshold: record.hfThreshold, hfTarget: record.hfTarget },
         });

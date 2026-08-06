@@ -32,12 +32,11 @@ export interface GuardianConfig {
   /** Model id served by the base URL (NVIDIA NIM catalog, e.g. deepseek-ai/deepseek-v4-flash). */
   llmModel: string;
   /**
-   * Optional Gemini free-tier fallback (OpenAI-compatible endpoint). When set, the
-   * decision layer tries the primary model first and falls back to Gemini if the
-   * primary doesn't respond within {@link llmTimeoutMs}.
+   * Gemini API key — the primary decision model (OpenAI-compatible endpoint). The
+   * decision layer tries Gemini first, then the NVIDIA fallback if configured.
    */
   geminiApiKey: string;
-  /** Model id on the Gemini fallback (e.g. gemini-2.5-flash on the free tier). */
+  /** Model id on the Gemini primary (e.g. gemini-2.5-flash on the free tier). */
   geminiModel: string;
   /**
    * Per-attempt LLM timeout in ms. Kept short so the Guardian stays fast — if a

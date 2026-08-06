@@ -34,12 +34,12 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
                                  ▼  handoff (HTTP webhook on Pro,
                                  ▼   out-of-band trigger on free)
    engages only when     ┌─────────────────────────────────────────────┐
-   there's a real        │  LLM Decision Layer  (NVIDIA NIM / OpenAI)   │
+   there's a real        │  LLM Decision Layer  (Gemini / NVIDIA NIM)   │
    decision to make      │                                              │
                         │  Inputs: HF, collateral, debt, wallet        │
-                        │  balances, gas cost of each option           │
+                        │  balances + Aave Pool allowance              │
                         │  Decides: repay vs add-collateral, + amount   │
-                        │  to restore HF to TARGET at lowest cost       │
+                        │  to restore HF to TARGET                     │
                         └────────┬─────────────────────────────────────┘
                                  ▼
                         ┌─────────────────────────────────────────────┐
@@ -73,6 +73,9 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
   [scripts/deploy-workflow.ts](../scripts/deploy-workflow.ts) (`npm run deploy-workflow`).
 - **`src/agent/`** — the LLM decision layer. Receives position snapshot, returns a structured
   decision `{ action: "repay"|"supply", token, amount, reasoning }`, then calls KeeperHub to execute.
+  Lever executability is checked before the LLM: repay/supply are only offered when the wallet
+  balance and Aave Pool allowance cover the sized amount — simulate-first is the final safety net,
+  not the first one.
 - **`scripts/`** — setup & verification: first-tx dry-run, health checks, sizing tests, workflow deploy.
 - **`server/` + `web/`** — the hosted face: an observer dashboard **and** a Telegram bot, in one
   node process (port 8787). `server/` holds each user's KeeperHub key **encrypted at rest**
@@ -198,9 +201,9 @@ out of the health factor, so the rescue amount is exact token arithmetic with no
 
 The demo loop (see [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md)):
 `npm run setup-position` opens a fresh at-risk position (borrows up to ~97% of capacity, HF just
-above 1.0) → `npm run guardian` reads it, the decision layer (NVIDIA NIM) picks repay vs. supply,
-KeeperHub simulates first, then broadcasts and confirms. The real rescue tx is independently
-verifiable via RPC `eth_getLogs` on the Aave Pool's `Repay` event (TEARDOWN F9).
+above 1.0) → `npm run guardian` reads it, the decision layer (Gemini primary, NVIDIA NIM fallback)
+picks repay vs. supply, KeeperHub simulates first, then broadcasts and confirms. The real rescue tx
+is independently verifiable via RPC `eth_getLogs` on the Aave Pool's `Repay` event (TEARDOWN F9).
 
 ## Resolved earlier open questions
 

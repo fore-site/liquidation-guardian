@@ -61,6 +61,17 @@ export interface PositionSnapshot {
   debts: AssetPosition[];
   /** Collateral assets (aToken balance > 0). */
   collaterals: AssetPosition[];
+  /**
+   * Wallet token balances in base units, keyed by upper-case symbol. When present,
+   * repay/supply levers are gated on holding enough. Absent = unknown (legacy
+   * callers: availability falls back to math-only sizing).
+   */
+  walletBalances?: Record<string, bigint>;
+  /**
+   * Aave Pool allowance in base units, keyed by upper-case symbol. When present,
+   * levers are gated on the Pool being allowed to pull the amount. Absent = unknown.
+   */
+  allowances?: Record<string, bigint>;
 }
 
 /** A single, executable rescue instruction, sized in token base units. */
@@ -216,6 +227,7 @@ export function computeCandidates(
       // required amount (i.e. 0 < units < the asset's full debt).
       const reachesTarget =
         snap.debts.length <= 1 ? units > 0n : units > 0n && units < debt.tokens;
+      const gate = executability(snap, debt, units);
       out.push({
         action: "repay",
         asset: debt,
@@ -223,8 +235,8 @@ export function computeCandidates(
         amountHuman: toHuman(units, debt.decimals),
         assetUsd,
         reachesTarget,
-        available: units > 0n,
-        note: units > 0n ? undefined : "computed amount is zero",
+        available: units > 0n && gate.available,
+        note: units > 0n ? gate.note : "computed amount is zero",
       });
     } catch (err) {
       out.push({
@@ -244,6 +256,7 @@ export function computeCandidates(
     const assetUsd = assetUsdWeight(coll, snap.totalCollateralUsd, snap.collaterals.length);
     try {
       const units = sizeSupply(coll, snap, hfTarget, bufferBps);
+      const gate = executability(snap, coll, units);
       out.push({
         action: "supply",
         asset: coll,
@@ -251,8 +264,8 @@ export function computeCandidates(
         amountHuman: toHuman(units, coll.decimals),
         assetUsd,
         reachesTarget: units > 0n, // supply is never capped — it always reaches target
-        available: units > 0n,
-        note: units > 0n ? undefined : "computed amount is zero",
+        available: units > 0n && gate.available,
+        note: units > 0n ? gate.note : "computed amount is zero",
       });
     } catch (err) {
       out.push({
@@ -269,6 +282,42 @@ export function computeCandidates(
   }
 
   return out;
+}
+
+/**
+ * Executability gate for a sized lever: when the snapshot carries the wallet's
+ * token balance and Pool allowance, the lever is only executable if the wallet
+ * holds enough AND has allowed the Pool to pull it. Without that data (legacy
+ * callers / tests), the lever is assumed executable — math-only sizing.
+ *
+ * Aave pulls the token from the wallet for both repay and supply, so the same
+ * balance + allowance check covers both actions.
+ */
+function executability(
+  snap: PositionSnapshot,
+  asset: AssetPosition,
+  units: bigint,
+): { available: boolean; note?: string } {
+  const symbol = asset.symbol.toUpperCase();
+  const problems: string[] = [];
+
+  const balance = snap.walletBalances?.[symbol];
+  if (balance !== undefined) {
+    if (balance < units) {
+      problems.push(`wallet holds ${toHuman(balance, asset.decimals)} ${asset.symbol}, needs ${toHuman(units, asset.decimals)}`);
+    }
+  }
+  const allowance = snap.allowances?.[symbol];
+  if (allowance !== undefined) {
+    if (allowance < units) {
+      problems.push(`Pool allowance ${toHuman(allowance, asset.decimals)} ${asset.symbol}, needs ${toHuman(units, asset.decimals)}`);
+    }
+  }
+
+  return {
+    available: problems.length === 0,
+    note: problems.length > 0 ? `unavailable: ${problems.join("; ")}` : undefined,
+  };
 }
 
 /** USD weight of one asset: exact (whole side) for a single-asset side, else price×tokens. */
@@ -344,8 +393,6 @@ export interface DecideInput {
   snapshot: PositionSnapshot;
   hfThreshold: number;
   hfTarget: number;
-  /** Wallet token balances (symbol → human amount) to inform the choice. */
-  walletBalances?: Record<string, number>;
   model?: string;
   bufferBps?: number;
   /** Hard per-attempt budget in ms. When it lapses, the request is aborted. */
@@ -388,9 +435,7 @@ export async function decideRescue(
         : `  • supply ${c.asset.symbol} — unavailable (${c.note})`,
     );
 
-  const balancesLine = input.walletBalances
-    ? `Wallet balances: ${JSON.stringify(input.walletBalances)}`
-    : "Wallet balances: not provided.";
+  const fundsLine = buildFundsLine(snapshot);
 
   const prompt = [
     `A DeFi borrow position on Aave v3 is approaching liquidation.`,
@@ -406,7 +451,7 @@ export async function decideRescue(
     ...repayLines,
     ...supplyLines,
     ``,
-    balancesLine,
+    fundsLine,
     ``,
     `Choose ONE lever and call submit_rescue_decision with its action and assetSymbol.`,
     `Prefer repay when the debt asset is on hand (more capital-efficient, frees`,
@@ -466,61 +511,94 @@ export async function decideRescue(
 
 /** Which provider produced a decision, for logs/audit. */
 export interface DecisionSource {
-  provider: "nvidia" | "gemini" | "deterministic";
+  provider: "gemini" | "nvidia" | "deterministic";
   detail?: string;
 }
 
 /**
- * Try the primary (NVIDIA) model first with a short per-attempt budget, then the
- * Gemini free-tier fallback if configured, then the deterministic sizing. Each LLM
+ * Try the primary (Gemini) model first with a short per-attempt budget, then the
+ * NVIDIA NIM fallback if configured, then the deterministic sizing. Each LLM
  * attempt is aborted after `timeoutMs` so the Guardian stays fast even when a
  * provider is slow or down. Never throws for a slow model — worst case is the
  * deterministic fallback (the position is still protected).
  */
 export async function decideRescueWithFallback(opts: {
   primary: OpenAI;
-  /** Model id on the primary provider. */
+  /** Model id on the primary provider (Gemini). */
   primaryModel?: string;
-  /** Optional Gemini fallback client. When null, only primary → deterministic. */
-  gemini?: OpenAI;
-  geminiModel?: string;
+  /** Optional NVIDIA fallback client. When null, only primary → deterministic. */
+  fallback?: OpenAI;
+  fallbackModel?: string;
   /** Per-attempt budget in ms. */
   timeoutMs?: number;
   input: Omit<DecideInput, "model" | "timeoutMs"> & { model?: string };
 }): Promise<{ decision: RescueDecision; source: DecisionSource }> {
-  const { primary, gemini, timeoutMs } = opts;
+  const { primary, fallback, timeoutMs } = opts;
 
-  // 1. Primary (NVIDIA).
+  // 1. Primary (Gemini — fast, reliable). Gemini's OpenAI-compat rejects
+  //    non-strict schemas, so force `additionalProperties: false` here.
   try {
-    const decision = await decideRescue(primary, { ...opts.input, timeoutMs });
-    return { decision, source: { provider: "nvidia" } };
-  } catch (err) {
-    // Fall through to Gemini; keep the error for the audit trail.
-    if (!gemini) throw err;
-    log.warn("NVIDIA decision failed; trying Gemini", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  // 2. Gemini fallback (free tier, OpenAI-compatible endpoint). Gemini's OpenAI-compat
-  //    rejects non-strict schemas, so force `additionalProperties: false` here.
-  try {
-    const decision = await decideRescue(gemini, {
+    const decision = await decideRescue(primary, {
       ...opts.input,
-      model: opts.geminiModel ?? "gemini-2.5-flash",
+      model: opts.primaryModel ?? "gemini-2.5-flash",
       timeoutMs,
       strictSchema: true,
     });
     return { decision, source: { provider: "gemini" } };
   } catch (err) {
+    // Fall through to NVIDIA; keep the error for the audit trail.
+    if (!fallback) throw err;
+    log.warn("Gemini decision failed; trying NVIDIA", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 2. NVIDIA NIM fallback (OpenAI-compatible endpoint).
+  try {
+    const decision = await decideRescue(fallback, {
+      ...opts.input,
+      model: opts.fallbackModel ?? "deepseek-ai/deepseek-v4-flash",
+      timeoutMs,
+    });
+    return { decision, source: { provider: "nvidia" } };
+  } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`Both NVIDIA and Gemini failed (${detail}); using deterministic sizing.`);
+    throw new Error(`Both Gemini and NVIDIA failed (${detail}); using deterministic sizing.`);
   }
 }
 
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "∞";
   return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+/**
+ * Human-readable wallet funds line for the LLM prompt: balances + Pool allowances
+ * per asset, when the snapshot carries them (the guardian fetches both).
+ */
+function buildFundsLine(snap: PositionSnapshot): string {
+  const bal = snap.walletBalances;
+  const allow = snap.allowances;
+  if (!bal && !allow) return "Wallet balances: not provided.";
+
+  const assets = new Set<string>([
+    ...snap.debts.map((d) => d.symbol.toUpperCase()),
+    ...snap.collaterals.map((c) => c.symbol.toUpperCase()),
+  ]);
+  const parts: string[] = [];
+  for (const symbol of assets) {
+    const asset = snap.debts.find((d) => d.symbol.toUpperCase() === symbol) ??
+      snap.collaterals.find((c) => c.symbol.toUpperCase() === symbol);
+    if (!asset) continue;
+    const decimals = asset.decimals;
+    const balance = bal?.[symbol];
+    const allowance = allow?.[symbol];
+    const bits: string[] = [];
+    if (balance !== undefined) bits.push(`balance ${toHuman(balance, decimals)}`);
+    if (allowance !== undefined) bits.push(`Pool allowance ${toHuman(allowance, decimals)}`);
+    parts.push(`${symbol}: ${bits.join(" · ") || "unknown"}`);
+  }
+  return `Wallet funds: ${parts.join(" | ")}`;
 }
 
 /**

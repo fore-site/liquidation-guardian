@@ -365,6 +365,41 @@ export class KeeperHub {
     };
   }
 
+  /**
+   * Read an ERC-20 `balanceOf(owner)` or `allowance(owner, spender)` in token base
+   * units via the generic contract-call read path. A read failure returns `0n`
+   * (never throws) so a snapshot can degrade gracefully — same pattern as the
+   * reserve reads above.
+   */
+  async readErc20(
+    chainId: string,
+    token: string,
+    fn: "balanceOf" | "allowance",
+    owner: string,
+    spender?: string,
+  ): Promise<bigint> {
+    const functionArgs =
+      fn === "allowance" ? [owner, spender ?? ""] : [owner];
+    try {
+      const res = await this.contractCall(
+        { chainId, contractAddress: token, functionName: fn, functionArgs },
+        { simulate: true },
+      );
+      // contract-call returns the raw decoded value as the top-level `result`
+      // string (e.g. "1598552832346373994432"); some deployments nest it. Read
+      // both shapes so the parser is robust either way.
+      const raw = res.result;
+      const value =
+        typeof raw === "string" ? raw : (raw as Record<string, unknown> | undefined)?.result;
+      return toBigInt(typeof value === "string" ? value : undefined, "0");
+    } catch (err) {
+      log.warn(`ERC-20 ${fn} read failed for ${token}`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return 0n;
+    }
+  }
+
   // ── Workflows (the deterministic "watches" half) ───────────────────────────
   // The hosted plan does NOT expose REST create — POST /api/workflows returns
   // 405; workflows are created via the MCP `create_workflow` tool or the web UI.
