@@ -2,11 +2,12 @@ import OpenAI from "openai";
 import "dotenv/config";
 import { decideRescue } from "../src/agent/decide.js";
 
-// Realistic single-asset LINK/LINK position: collateral ~$8k, debt ~$6k, HF ~1.13
+// Probes the configured LLM (any OpenAI-compatible provider via LLM_* env) with
+// a realistic single-asset LINK/LINK position: collateral ~$8k, debt ~$6k, HF ~1.13
 // (price-free — single asset per side, no oracle needed).
 const client = new OpenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+  apiKey: process.env.LLM_API_KEY,
+  baseURL: process.env.LLM_BASE_URL,
 });
 
 const LINK = 10n ** 18n;
@@ -24,14 +25,14 @@ try {
     snapshot: snapshot as never,
     hfThreshold: 1.15,
     hfTarget: 1.5,
-    model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+    model: process.env.LLM_MODEL ?? "",
     timeoutMs: 30000,
     strictSchema: true,
   });
   console.log(
-    "GEMINI DECISION OK:",
+    "LLM DECISION OK:",
     JSON.stringify(d, (_key, v) => (typeof v === "bigint" ? v.toString() : v), 2),
   );
 } catch (e) {
-  console.log("GEMINI DECISION FAILED:", e instanceof Error ? e.message : String(e));
+  console.log("LLM DECISION FAILED:", e instanceof Error ? e.message : String(e));
 }

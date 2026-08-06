@@ -41,30 +41,20 @@ const WEB_DIST = join(process.cwd(), "web", "dist");
 const cfg = loadServerConfig();
 const store = new GuardianStore({ redisUrl: cfg.redisUrl, masterKeyHex: cfg.guardianMasterKey });
 // Optional operator-owned LLM stack for the decision layer (shared across users):
-// Gemini primary + optional NVIDIA NIM fallback, with a short per-attempt
-// budget so the watch loop stays fast when a provider is slow.
-const nvidiaKey = process.env.NVIDIA_API_KEY;
-const geminiKey = process.env.GEMINI_API_KEY;
+// any OpenAI-compatible provider configured via env (key, base URL, model), with
+// a short per-attempt budget so the watch loop stays fast when it's slow.
+const llmKey = process.env.LLM_API_KEY;
+const llmBaseUrl = process.env.LLM_BASE_URL;
+const llmModel = process.env.LLM_MODEL;
 const llm: LlmConfig | null =
-  geminiKey && !geminiKey.includes("your_")
+  llmKey && !llmKey.includes("your_") && llmBaseUrl && llmModel
     ? {
-        primary: new OpenAI({
-          apiKey: geminiKey,
-          baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        client: new OpenAI({
+          apiKey: llmKey,
+          baseURL: llmBaseUrl,
         }),
-        primaryModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+        model: llmModel,
         timeoutMs: Number(process.env.LLM_TIMEOUT_MS ?? 15000),
-        ...(nvidiaKey && !nvidiaKey.includes("your_")
-          ? {
-              fallback: new OpenAI({
-                apiKey: nvidiaKey,
-                ...(process.env.BASE_URL && !process.env.BASE_URL.includes("your_")
-                  ? { baseURL: process.env.BASE_URL }
-                  : {}),
-              }),
-              fallbackModel: process.env.LLM_MODEL ?? "deepseek-ai/deepseek-v4-flash",
-            }
-          : {}),
       }
     : null;
 let bot: GuardianBot | null = null;

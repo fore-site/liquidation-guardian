@@ -22,12 +22,10 @@ Under active development for the hackathon (deadline 2026-08-13). See [docs/ARCH
 2. **Create an API key.** Settings → API Keys → Organisation tab. It starts with `kh_`.
 3. **Fund on Sepolia.** Get free test ETH from a Sepolia faucet to your wallet address.
 4. **Configure.** `cp .env.example .env` and fill in your key, wallet address, and chain.
-5. **LLM config (decision layer).** The agent runs on Gemini (OpenAI-compatible) as the primary
-   decision model. Add `GEMINI_API_KEY` (from [aistudio.google.com](https://aistudio.google.com),
-   starts with `AQ.`). Optional: add `NVIDIA_API_KEY` (from [build.nvidia.com](https://build.nvidia.com))
-   as a fallback, keeping `BASE_URL=https://integrate.api.nvidia.com/v1` and optionally
-   `LLM_MODEL=deepseek-ai/deepseek-v4-flash`. If `BASE_URL` is exported in your shell, it shadows
-   `.env` — unset it first.
+5. **LLM config (decision layer).** The agent works with any OpenAI-compatible provider. Set
+   `LLM_API_KEY`, `LLM_BASE_URL` (the provider's `/v1` endpoint), and `LLM_MODEL` in `.env`. For
+   example, OpenRouter: key from [openrouter.ai](https://openrouter.ai), base URL
+   `https://openrouter.ai/api/v1`, model `deepseek/deepseek-v4-flash-0731`.
 6. **Verify with a dry-run first tx** (simulate, no broadcast), then execute for real:
    ```bash
    npm run first-tx

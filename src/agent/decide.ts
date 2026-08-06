@@ -350,10 +350,8 @@ export function candidateToDecision(c: RescueCandidate, reasoning: string): Resc
 
 /**
  * OpenAI-compatible tool the model is forced to call — guarantees a parseable
- * decision. `strict` adds `additionalProperties: false` to the schema, which the
- * Gemini free-tier OpenAI-compat endpoint requires (it rejects the tool call with
- * `function_call_filter: MALFORMED_FUNCTION_CALL` otherwise). NVIDIA's endpoint
- * accepts both.
+ * decision. `strict` adds `additionalProperties: false` to the schema, which
+ * OpenAI-compatible endpoints that enforce strict output require.
  */
 function decisionTool(strict: boolean): OpenAI.Chat.Completions.ChatCompletionTool {
   return {
@@ -395,22 +393,23 @@ export interface DecideInput {
   hfTarget: number;
   /**
    * Multi-step context: what earlier steps of this rescue run already did
-   * ("step 1: repaid 153.9 LINK via gemini → HF 1.0865 → 1.3012"). Empty string
+   * ("step 1: repaid 153.9 LINK → HF 1.0865 → 1.3012"). Empty string
    * means this is the first decision. Lets the model reason across steps instead
    * of treating every decision as stateless.
    */
   history?: string;
-  model?: string;
+  /** Model id served by the configured base URL — required for the LLM call. */
+  model: string;
   bufferBps?: number;
   /** Hard per-attempt budget in ms. When it lapses, the request is aborted. */
   timeoutMs?: number;
-  /** Gemini's OpenAI-compat needs `additionalProperties: false` in the tool schema. */
+  /** Some OpenAI-compatible endpoints need `additionalProperties: false` in the tool schema. */
   strictSchema?: boolean;
 }
 
 /**
- * Ask the hosted LLM (NVIDIA NIM / OpenAI-compatible endpoint) to pick the rescue
- * lever. Amounts are computed here (not by the model); the model picks the action +
+ * Ask the configured LLM (OpenAI-compatible endpoint) to pick the rescue lever.
+ * Amounts are computed here (not by the model); the model picks the action +
  * asset among the sized, available options and explains it. Falls back to
  * {@link decideRescueDeterministic} if the model picks something unavailable.
  * Returns a structured, code-sized {@link RescueDecision}.
@@ -479,12 +478,12 @@ export async function decideRescue(
   const tool = decisionTool(strict);
   const completion = await client.chat.completions.create(
     {
-      model: input.model ?? "deepseek-ai/deepseek-v4-flash",
+      model: input.model,
       max_tokens: 1024,
       tools: [tool],
-      // Gemini's OpenAI-compat doesn't accept the named-function tool_choice form
-      // (→ MALFORMED_FUNCTION_CALL); with a single tool, "required" is equivalent
-      // and works on both providers.
+      // Some OpenAI-compatible endpoints don't accept the named-function
+      // tool_choice form; with a single tool, "required" is equivalent and
+      // works across providers.
       tool_choice: strict ? "required" : { type: "function", function: { name: tool.function.name } },
       messages: [{ role: "user", content: prompt }],
     },
@@ -525,59 +524,41 @@ export async function decideRescue(
 
 /** Which provider produced a decision, for logs/audit. */
 export interface DecisionSource {
-  provider: "gemini" | "nvidia" | "deterministic";
+  provider: "llm" | "deterministic";
   detail?: string;
 }
 
 /**
- * Try the primary (Gemini) model first with a short per-attempt budget, then the
- * NVIDIA NIM fallback if configured, then the deterministic sizing. Each LLM
- * attempt is aborted after `timeoutMs` so the Guardian stays fast even when a
- * provider is slow or down. Never throws for a slow model — worst case is the
- * deterministic fallback (the position is still protected).
+ * Ask the configured LLM (any OpenAI-compatible endpoint) for a decision with a
+ * short per-attempt budget. On failure (slow/down model, unparseable output) it
+ * falls through to the deterministic sizing, which keeps the position protected —
+ * reliability first.
  */
-export async function decideRescueWithFallback(opts: {
-  primary: OpenAI;
-  /** Model id on the primary provider (Gemini). */
-  primaryModel?: string;
-  /** Optional NVIDIA fallback client. When null, only primary → deterministic. */
-  fallback?: OpenAI;
-  fallbackModel?: string;
+export async function decideRescueWithLlm(opts: {
+  client: OpenAI;
+  /** Model id served by the configured base URL. */
+  model: string;
   /** Per-attempt budget in ms. */
   timeoutMs?: number;
-  input: Omit<DecideInput, "model" | "timeoutMs"> & { model?: string };
+  input: Omit<DecideInput, "model" | "timeoutMs">;
 }): Promise<{ decision: RescueDecision; source: DecisionSource }> {
-  const { primary, fallback, timeoutMs } = opts;
-
-  // 1. Primary (Gemini — fast, reliable). Gemini's OpenAI-compat rejects
-  //    non-strict schemas, so force `additionalProperties: false` here.
   try {
-    const decision = await decideRescue(primary, {
+    const decision = await decideRescue(opts.client, {
       ...opts.input,
-      model: opts.primaryModel ?? "gemini-2.5-flash",
-      timeoutMs,
-      strictSchema: true,
+      model: opts.model,
+      timeoutMs: opts.timeoutMs,
     });
-    return { decision, source: { provider: "gemini" } };
+    return { decision, source: { provider: "llm" } };
   } catch (err) {
-    // Fall through to NVIDIA; keep the error for the audit trail.
-    if (!fallback) throw err;
-    log.warn("Gemini decision failed; trying NVIDIA", {
+    log.warn("LLM decision failed; using deterministic sizing", {
       error: err instanceof Error ? err.message : String(err),
     });
-  }
-
-  // 2. NVIDIA NIM fallback (OpenAI-compatible endpoint).
-  try {
-    const decision = await decideRescue(fallback, {
-      ...opts.input,
-      model: opts.fallbackModel ?? "deepseek-ai/deepseek-v4-flash",
-      timeoutMs,
-    });
-    return { decision, source: { provider: "nvidia" } };
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`Both Gemini and NVIDIA failed (${detail}); using deterministic sizing.`);
+    const decision = decideRescueDeterministic(
+      opts.input.snapshot,
+      opts.input.hfTarget,
+      opts.input.bufferBps,
+    );
+    return { decision, source: { provider: "deterministic" } };
   }
 }
 

@@ -16,7 +16,7 @@
 import { KeeperHub, type AavePosition } from "../keeperhub.js";
 import { createLogger } from "../log.js";
 import {
-  decideRescueWithFallback,
+  decideRescueWithLlm,
   decideRescueDeterministic,
   type RescueDecision,
 } from "./decide.js";
@@ -29,7 +29,7 @@ export interface AgentStep {
   /** 1-based step number. */
   index: number;
   decision: RescueDecision;
-  /** Which provider decided it ("gemini" | "nvidia" | "deterministic"). */
+  /** Which provider decided it ("llm" | "deterministic"). */
   provider: string;
   /** HF before the step. */
   hfBefore: number;
@@ -118,31 +118,25 @@ export async function runAgenticRescue(opts: {
       };
     }
 
-    // Decide: LLM picks a lever from the sized candidates, with history context.
+    // Decide: the LLM picks a lever from the sized candidates, with history
+    // context. On LLM failure it falls through to the deterministic safeguard
+    // inside decideRescueWithLlm (never throws).
     let decision: RescueDecision;
     let provider: string;
     if (llm) {
-      try {
-        const r = await decideRescueWithFallback({
-          primary: llm.primary,
-          primaryModel: llm.primaryModel,
-          fallback: llm.fallback,
-          fallbackModel: llm.fallbackModel,
-          timeoutMs: llm.timeoutMs,
-          input: {
-            snapshot,
-            hfThreshold,
-            hfTarget,
-            history: history.join("\n"),
-          },
-        });
-        decision = r.decision;
-        provider = r.source.provider;
-      } catch {
-        // LLM chain fully failed (e.g. both providers down) — deterministic safeguard.
-        decision = decideRescueDeterministic(snapshot, hfTarget);
-        provider = "deterministic";
-      }
+      const r = await decideRescueWithLlm({
+        client: llm.client,
+        model: llm.model,
+        timeoutMs: llm.timeoutMs,
+        input: {
+          snapshot,
+          hfThreshold,
+          hfTarget,
+          history: history.join("\n"),
+        },
+      });
+      decision = r.decision;
+      provider = r.source.provider;
     } else {
       decision = decideRescueDeterministic(snapshot, hfTarget);
       provider = "deterministic";

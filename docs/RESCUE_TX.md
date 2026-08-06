@@ -65,11 +65,11 @@ model-produced number for the amount.
 | KeeperHub execution | simulate → broadcast → confirm | tx `0x5683f7fb…` |
 
 > **Note on this specific run:** it executed via the **deterministic fallback** decision path.
-> `NVIDIA_API_KEY` was not yet set, so the Guardian used its LLM-free sizing to stay protected.
+> No LLM key was configured, so the Guardian used its LLM-free sizing to stay protected.
 > The choice was the obvious one (repay, since debt is on hand) and the amount is identical either
 > way, since the arithmetic is deterministic regardless of who picks the action. The LLM-in-the-loop
-> path (a hosted NVIDIA NIM model choosing repay vs. supply and explaining it) is wired and ready;
-> it needs a fresh at-risk position to demo, since HF is now healthy at 1.5027.
+> path (a hosted OpenAI-compatible model choosing repay vs. supply and explaining it) is wired and
+> ready; it needs a fresh at-risk position to demo, since HF is now healthy at 1.5027.
 
 ## Reproduce
 

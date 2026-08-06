@@ -26,7 +26,7 @@ import { runAgenticRescue } from "../src/agent/agent.js";
 import {
   candidateToDecision,
   computeCandidates,
-  decideRescueWithFallback,
+  decideRescueWithLlm,
   decideRescueDeterministic,
   type RescueCandidate,
 } from "../src/agent/decide.js";
@@ -385,11 +385,9 @@ export class GuardianBot {
     try {
       let decision;
       if (this.llm) {
-        const r = await decideRescueWithFallback({
-          primary: this.llm.primary,
-          primaryModel: this.llm.primaryModel,
-          fallback: this.llm.fallback,
-          fallbackModel: this.llm.fallbackModel,
+        const r = await decideRescueWithLlm({
+          client: this.llm.client,
+          model: this.llm.model,
           timeoutMs: this.llm.timeoutMs,
           input: { snapshot, hfThreshold: record.hfThreshold, hfTarget: record.hfTarget },
         });

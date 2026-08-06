@@ -34,7 +34,7 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
                                  ▼  handoff (HTTP webhook on Pro,
                                  ▼   out-of-band trigger on free)
    engages only when     ┌─────────────────────────────────────────────┐
-   there's a real        │  LLM Decision Layer  (Gemini / NVIDIA NIM)   │
+   there's a real        │  LLM Decision Layer  (OpenAI-compatible)     │
    decision to make      │                                              │
                         │  Inputs: HF, collateral, debt, wallet        │
                         │  balances + Aave Pool allowance              │
@@ -201,7 +201,8 @@ out of the health factor, so the rescue amount is exact token arithmetic with no
 
 The demo loop (see [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md)):
 `npm run setup-position` opens a fresh at-risk position (borrows up to ~97% of capacity, HF just
-above 1.0) → `npm run guardian` reads it, the decision layer (Gemini primary, NVIDIA NIM fallback)
+above 1.0) → `npm run guardian` reads it, the decision layer (any OpenAI-compatible provider,
+configured via `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`)
 picks repay vs. supply, KeeperHub simulates first, then broadcasts and confirms. The real rescue tx
 is independently verifiable via RPC `eth_getLogs` on the Aave Pool's `Repay` event (TEARDOWN F9).
 

@@ -43,14 +43,11 @@ export interface GuardianResult {
   detail?: string;
 }
 
-/** LLM stack for the decision layer: primary + optional fallback + timeout. */
+/** LLM stack for the decision layer: an OpenAI-compatible client + timeout. */
 export interface LlmConfig {
-  primary: OpenAI;
-  /** Model id on the primary provider (Gemini). */
-  primaryModel?: string;
-  /** Optional NVIDIA NIM fallback (OpenAI-compatible endpoint). */
-  fallback?: OpenAI;
-  fallbackModel?: string;
+  client: OpenAI;
+  /** Model id served by the configured base URL. */
+  model: string;
   /** Per-attempt budget in ms. */
   timeoutMs?: number;
 }
@@ -350,34 +347,23 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const cfg = loadConfig(); // LLM keys optional — deterministic fallback if absent.
   const keeperHub = new KeeperHub({ apiKey: cfg.keeperHubApiKey });
 
-  // Primary LLM: Gemini (OpenAI-compatible endpoint — fast, reliable).
-  const llm: LlmConfig | null = cfg.geminiApiKey
+  // LLM: any OpenAI-compatible provider configured via env (key, base URL, model).
+  // Falls back to deterministic sizing if the provider is unreachable.
+  const llm: LlmConfig | null = cfg.llmApiKey
     ? {
-        primary: new OpenAI({
-          apiKey: cfg.geminiApiKey,
-          baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        client: new OpenAI({
+          apiKey: cfg.llmApiKey,
+          baseURL: cfg.llmBaseUrl,
         }),
-        primaryModel: cfg.geminiModel,
+        model: cfg.llmModel,
         timeoutMs: cfg.llmTimeoutMs,
-        // Optional NVIDIA NIM fallback (OpenAI-compatible endpoint).
-        ...(cfg.nvidiaApiKey
-          ? {
-              fallback: new OpenAI({
-                apiKey: cfg.nvidiaApiKey,
-                // Route through the NVIDIA NIM endpoint (or another OpenAI-compatible
-                // gateway) when BASE_URL is set; else the OpenAI SDK default.
-                ...(cfg.openaiBaseUrl ? { baseURL: cfg.openaiBaseUrl } : {}),
-              }),
-              fallbackModel: cfg.llmModel,
-            }
-          : {}),
       }
     : null;
 
   if (llm) {
-    console.log(`(LLM: ${cfg.geminiModel} via Gemini${cfg.nvidiaApiKey ? ` · NVIDIA fallback (${cfg.llmModel})` : ""}, ${cfg.llmTimeoutMs}ms budget)`);
+    console.log(`(LLM: ${cfg.llmModel} via ${cfg.llmBaseUrl}, ${cfg.llmTimeoutMs}ms budget)`);
   } else {
-    console.log("(No GEMINI_API_KEY set — running with the deterministic fallback decision.)");
+    console.log("(No LLM_API_KEY set — running with the deterministic fallback decision.)");
   }
   const dryRun = process.argv.includes("--dry-run");
   // --max-steps N: how many rescue steps one run may take before re-checking

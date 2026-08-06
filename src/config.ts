@@ -22,26 +22,18 @@ function optional(name: string, fallback: string): string {
 
 export interface GuardianConfig {
   keeperHubApiKey: string;
-  /** NVIDIA NIM API key for the primary LLM decision layer (https://integrate.api.nvidia.com). */
-  nvidiaApiKey: string;
   /**
-   * Optional OpenAI-compatible base URL (NVIDIA's hosted suite or a router/proxy in
-   * front of the models). Empty string ⇒ use the OpenAI SDK default (api.openai.com).
+   * LLM API key — any OpenAI-compatible provider (the provider and model are
+   * configured via env; the code is provider-agnostic).
    */
-  openaiBaseUrl: string;
-  /** Model id served by the base URL (NVIDIA NIM catalog, e.g. deepseek-ai/deepseek-v4-flash). */
+  llmApiKey: string;
+  /** Base URL of the OpenAI-compatible API (e.g. a hosted router's /v1). */
+  llmBaseUrl: string;
+  /** Model id served by the base URL. */
   llmModel: string;
   /**
-   * Gemini API key — the primary decision model (OpenAI-compatible endpoint). The
-   * decision layer tries Gemini first, then the NVIDIA fallback if configured.
-   */
-  geminiApiKey: string;
-  /** Model id on the Gemini primary (e.g. gemini-2.5-flash on the free tier). */
-  geminiModel: string;
-  /**
-   * Per-attempt LLM timeout in ms. Kept short so the Guardian stays fast — if a
-   * model doesn't answer in time we move on (to the fallback, then to the
-   * deterministic sizing).
+   * Per-attempt LLM timeout in ms. Kept short so the Guardian stays fast — if the
+   * model doesn't answer in time we move on to the deterministic sizing.
    */
   llmTimeoutMs: number;
   chainId: string;
@@ -78,16 +70,15 @@ export function loadConfig(opts: { requireLlm?: boolean } = {}): GuardianConfig 
   return {
     keeperHubApiKey: required("KEEPERHUB_API_KEY"),
     // The LLM key is only needed for the decision layer, not for read/first-tx scripts.
-    nvidiaApiKey: opts.requireLlm
-      ? required("NVIDIA_API_KEY")
-      : optional("NVIDIA_API_KEY", ""),
-    // OpenAI-compatible router in front of the LLM: accept BASE_URL (this project's
-    // name) or the SDK's own OPENAI_BASE_URL. Passed explicitly to the client below.
-    openaiBaseUrl: optional("BASE_URL", optional("OPENAI_BASE_URL", "")),
-    llmModel: optional("LLM_MODEL", "deepseek-ai/deepseek-v4-flash"),
-    // Optional Gemini free-tier fallback (OpenAI-compatible endpoint). Empty ⇒ no fallback.
-    geminiApiKey: optional("GEMINI_API_KEY", ""),
-    geminiModel: optional("GEMINI_MODEL", "gemini-2.5-flash"),
+    llmApiKey: opts.requireLlm
+      ? required("LLM_API_KEY")
+      : optional("LLM_API_KEY", ""),
+    // OpenAI-compatible base URL — required only when the LLM is in use.
+    llmBaseUrl: opts.requireLlm
+      ? required("LLM_BASE_URL")
+      : optional("LLM_BASE_URL", ""),
+    // Model id served by the base URL — from env, never hardcoded.
+    llmModel: opts.requireLlm ? required("LLM_MODEL") : optional("LLM_MODEL", ""),
     // Short per-attempt budget so the Guardian stays fast and falls back quickly.
     llmTimeoutMs: Number(optional("LLM_TIMEOUT_MS", "15000")),
     chainId: optional("CHAIN_ID", "11155111"),
