@@ -20,12 +20,11 @@ import { loadConfig } from "../config.js";
 import { KeeperHub, type AavePosition, type UserReserveData } from "../keeperhub.js";
 import { createLogger } from "../log.js";
 import {
-  decideRescueWithFallback,
-  decideRescueDeterministic,
   type AssetPosition,
   type PositionSnapshot,
   type RescueDecision,
 } from "./decide.js";
+import { runAgenticRescue } from "./agent.js";
 import { SEPOLIA_POOL, SEPOLIA_RESERVES, VARIABLE_RATE_MODE, type ReserveInfo } from "./assets.js";
 import { readPriceUsd } from "./prices.js";
 
@@ -56,7 +55,14 @@ export interface LlmConfig {
   timeoutMs?: number;
 }
 
-/** One full guardian pass over a single position. */
+/**
+ * One full guardian pass over a single position.
+ *
+ * Thin wrapper over the agentic rescue loop for backward compatibility: the CLI
+ * and bot call this with the old signature and get the same statuses, but the
+ * decision now runs inside {@link runAgenticRescue} (which re-perceives between
+ * steps, so a multi-step rescue is possible when `maxSteps > 1`).
+ */
 export async function runGuardianOnce(opts: {
   keeperHub: KeeperHub;
   /** LLM stack for the decision. If null, deterministic sizing is used. */
@@ -70,71 +76,74 @@ export async function runGuardianOnce(opts: {
   collateralAsset?: string;
   /** When true, stop after a clean simulation — don't broadcast. */
   dryRun?: boolean;
+  /** Max rescue steps per run (default 1 — the old single-decision behavior). */
+  maxSteps?: number;
 }): Promise<GuardianResult> {
   const { keeperHub, llm, chainId, user, hfThreshold, hfTarget } = opts;
 
-  // 1. Read the live position.
-  const position = await keeperHub.readAavePosition(chainId, user);
-  log(`Health factor: ${fmtHf(position.healthFactor)}  (act below ${hfThreshold})`);
-  log(`  collateral $${position.totalCollateralUsd.toFixed(2)} · debt $${position.totalDebtUsd.toFixed(2)}`);
+  const run = await runAgenticRescue({
+    keeperHub,
+    llm,
+    chainId,
+    user,
+    hfThreshold,
+    hfTarget,
+    maxSteps: opts.maxSteps ?? 1,
+    dryRun: opts.dryRun,
+  });
+  const last = run.steps[run.steps.length - 1];
 
-  // 2. Healthy? Nothing to do — the cheap, common case.
-  if (position.healthFactor >= hfThreshold) {
-    log("Position healthy — no action.");
-    return { status: "healthy", position };
-  }
-  if (position.totalDebtUsd <= 0) {
-    return { status: "no_action", position, detail: "No debt to manage." };
-  }
-
-  // 3. Discover the position's actual composition (which reserves the user holds as
-  //    debt / collateral), then size every lever. Prices are fetched ONLY for a side
-  //    that holds ≥2 assets — a single-asset side (our LINK/LINK demo) needs none.
-  const snapshot = await buildSnapshot(keeperHub, chainId, user, position);
-  if (snapshot.debts.length === 0) {
-    return { status: "no_action", position, detail: "No debt reserves found to manage." };
-  }
-  log(
-    `  debts: ${snapshot.debts.map((d) => d.symbol).join(", ")} · ` +
-      `collaterals: ${snapshot.collaterals.map((c) => c.symbol).join(", ")}`,
-  );
-
-  // 4. At risk — decide which lever to pull (amount sized in code either way).
-  //    Use the LLM stack when available; fall back to deterministic sizing if not,
-  //    so the position stays protected even when every LLM is unreachable.
-  let decision: RescueDecision;
-  if (llm) {
-    log("⚠️  Below threshold — asking the decision layer for the fix…");
-    try {
-      const { decision: d, source } = await decideRescueWithFallback({
-        primary: llm.primary,
-        primaryModel: llm.primaryModel,
-        fallback: llm.fallback,
-        fallbackModel: llm.fallbackModel,
-        timeoutMs: llm.timeoutMs,
-        input: { snapshot, hfThreshold, hfTarget },
-      });
-      decision = d;
-      log(`  (decided by ${source.provider})`);
-    } catch (err) {
-      logger.warn("LLM decision failed; using deterministic fallback", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      decision = decideRescueDeterministic(snapshot, hfTarget);
+  switch (run.status) {
+    case "healthy":
+      return { status: "healthy", position: run.position, detail: run.summary };
+    case "no_action":
+      return { status: "no_action", position: run.position, detail: run.summary };
+    case "goal_met":
+      return {
+        status: "rescued",
+        position: run.position,
+        decision: last?.decision,
+        transactionHash: last?.transactionLink
+          ? extractHash(last.transactionLink)
+          : undefined,
+        transactionLink: last?.transactionLink,
+        detail: run.summary,
+      };
+    case "budget_hit": {
+      // A run that stopped before the goal. If the last step failed at
+      // simulate/execute, surface that; otherwise report the partial progress.
+      const failed = run.steps.find((s) => s.status === "simulation_failed");
+      if (failed) {
+        return {
+          status: "simulation_failed",
+          position: run.position,
+          decision: failed.decision,
+          detail: run.summary,
+        };
+      }
+      if (run.steps.length === 0) {
+        return { status: "healthy", position: run.position, detail: run.summary };
+      }
+      // Partial progress: the position improved but the budget ran out. The
+      // old statuses have no "partial" — report the last action + tx.
+      return {
+        status: "rescued",
+        position: run.position,
+        decision: last?.decision,
+        transactionHash: last?.transactionLink
+          ? extractHash(last.transactionLink)
+          : undefined,
+        transactionLink: last?.transactionLink,
+        detail: `${run.summary} ${run.steps.length} step(s).`,
+      };
     }
-  } else {
-    log("⚠️  Below threshold — no LLM key; using deterministic fallback.");
-    decision = decideRescueDeterministic(snapshot, hfTarget);
   }
-  log(`Decision: ${decision.action} ${decision.amountHuman} ${decision.asset}`);
-  log(`  reasoning: ${decision.reasoning}`);
+}
 
-  if (decision.amountUnits <= 0n) {
-    return { status: "no_action", position, decision, detail: "Computed rescue amount is zero." };
-  }
-
-  // 5–9. Build → simulate → (dry-run stop) → execute → confirm.
-  return executeRescue({ keeperHub, chainId, user, decision, dryRun: opts.dryRun, position });
+/** Pull the 0x… hash out of a transactionLink if it carries one. */
+function extractHash(link: string): string | undefined {
+  const m = link.match(/0x[0-9a-fA-F]{64}/);
+  return m?.[0];
 }
 
 /**
@@ -371,6 +380,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log("(No GEMINI_API_KEY set — running with the deterministic fallback decision.)");
   }
   const dryRun = process.argv.includes("--dry-run");
+  // --max-steps N: how many rescue steps one run may take before re-checking
+  // (default 1 = the classic single decision; >1 turns on the agentic loop).
+  const maxStepsArg = process.argv.indexOf("--max-steps");
+  const maxSteps =
+    maxStepsArg >= 0
+      ? Number(process.argv[maxStepsArg + 1])
+      : 1;
 
   runGuardianOnce({
     keeperHub,
@@ -382,6 +398,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     debtAsset: cfg.debtAsset,
     collateralAsset: cfg.collateralAsset,
     dryRun,
+    maxSteps,
   })
     .then((r) => {
       console.log(

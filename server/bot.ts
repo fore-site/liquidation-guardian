@@ -21,8 +21,8 @@ import type { LlmConfig } from "../src/agent/guardian.js";
 import {
   buildSnapshot,
   executeRescue,
-  runGuardianOnce,
 } from "../src/agent/guardian.js";
+import { runAgenticRescue } from "../src/agent/agent.js";
 import {
   candidateToDecision,
   computeCandidates,
@@ -348,13 +348,14 @@ export class GuardianBot {
     if (record.autoMode) {
       let result;
       try {
-        result = await runGuardianOnce({
+        result = await runAgenticRescue({
           keeperHub: kh,
           llm: this.llm,
           chainId: record.chainId,
           user: record.wallet,
           hfThreshold: record.hfThreshold,
           hfTarget: record.hfTarget,
+          maxSteps: 3, // the agent loops until safe or 3 steps spent
         });
       } catch (err) {
         // Rescue failed — do NOT mark alerted, so the next tick retries; and tell
@@ -370,7 +371,7 @@ export class GuardianBot {
       }
       // Only after a completed pass (any outcome) do we de-dupe the next tick.
       await this.store.markAlerted(record.id);
-      await this.tg.sendMessage(chatId, `🤖 Auto-rescue triggered.\n${this.renderResult(result)}`);
+      await this.tg.sendMessage(chatId, `🤖 Auto-rescue triggered.\n${this.renderAgentRun(result)}`);
       return;
     }
 
@@ -421,6 +422,28 @@ export class GuardianBot {
       { inlineKeyboard: buttons },
     );
     await this.store.markAlerted(record.id);
+  }
+
+  /** Human-readable outcome for an agentic rescue run (multi-step history). */
+  private renderAgentRun(result: Awaited<ReturnType<typeof runAgenticRescue>>): string {
+    const hf = Number.isFinite(result.position.healthFactor)
+      ? result.position.healthFactor.toFixed(4)
+      : "∞";
+    const lines = result.steps.map((s) => {
+      const what = `${s.decision.action} ${fmt(s.decision.amountHuman)} ${s.decision.asset} (${s.provider})`;
+      const hfBit = `HF ${s.hfBefore.toFixed(4)} → ${s.hfAfter.toFixed(4)}`;
+      const link = s.transactionLink ? `\n${s.transactionLink}` : "";
+      return `  step ${s.index}: ${what} — ${hfBit}${link}`;
+    });
+    const head =
+      result.status === "goal_met"
+        ? `✅ Rescue complete.`
+        : result.status === "healthy"
+          ? `✅ Position healthy (HF ${hf}).`
+          : result.status === "no_action"
+            ? `ℹ️ No action: ${result.summary}.`
+            : `⏸️ Budget hit — HF ${hf}. ${result.summary}`;
+    return [head, ...lines].join("\n");
   }
 
   /** Human-readable outcome for a GuardianResult, with the tx link when present. */

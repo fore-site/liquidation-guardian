@@ -393,6 +393,13 @@ export interface DecideInput {
   snapshot: PositionSnapshot;
   hfThreshold: number;
   hfTarget: number;
+  /**
+   * Multi-step context: what earlier steps of this rescue run already did
+   * ("step 1: repaid 153.9 LINK via gemini → HF 1.0865 → 1.3012"). Empty string
+   * means this is the first decision. Lets the model reason across steps instead
+   * of treating every decision as stateless.
+   */
+  history?: string;
   model?: string;
   bufferBps?: number;
   /** Hard per-attempt budget in ms. When it lapses, the request is aborted. */
@@ -436,6 +443,10 @@ export async function decideRescue(
     );
 
   const fundsLine = buildFundsLine(snapshot);
+  const history = input.history?.trim();
+  const historyLine = history
+    ? `Previous actions in this rescue run: ${history}`
+    : "This is the first decision of this rescue run.";
 
   const prompt = [
     `A DeFi borrow position on Aave v3 is approaching liquidation.`,
@@ -443,6 +454,8 @@ export async function decideRescue(
     `Health factor: ${fmt(snapshot.healthFactor)} (liquidation at 1.0; we act below ${hfThreshold}).`,
     `Total debt: $${fmt(snapshot.totalDebtUsd)} · total collateral: $${fmt(snapshot.totalCollateralUsd)}`,
     `Target health factor to restore: ${hfTarget}`,
+    ``,
+    historyLine,
     ``,
     `Debt assets: ${snapshot.debts.map((d) => d.symbol).join(", ") || "none"}`,
     `Collateral assets: ${snapshot.collaterals.map((c) => c.symbol).join(", ") || "none"}`,
@@ -456,7 +469,8 @@ export async function decideRescue(
     `Choose ONE lever and call submit_rescue_decision with its action and assetSymbol.`,
     `Prefer repay when the debt asset is on hand (more capital-efficient, frees`,
     `borrowing power); prefer supply when you'd rather not spend down the debt asset.`,
-    `Only pick an asset listed as available.`,
+    `Only pick an asset listed as available. If no lever is available, do NOT invent`,
+    `one — the caller will fall back to a deterministic safeguard.`,
   ].join("\n");
 
   // Forcing the tool guarantees structured output. (Extended thinking isn't
