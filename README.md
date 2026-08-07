@@ -57,22 +57,24 @@ of the rescues it has already executed onchain — each linking to the transacti
 
 It's split in two so a credential never reaches the browser:
 
-- `server/` — a small API that holds your KeeperHub key **encrypted at rest** (AES-256-GCM, in a
-  Redis-backed store) and exposes only read data (`/api/status`, `/api/rescues`). You enter your key,
-  wallet, and risk levels once in the onboarding form; the key is kept server-side (HttpOnly cookie
-  session), never in the page.
-- `web/` — a Vite + React app that renders that data and proxies `/api` to the server in dev.
+- `server/` — the shared engine: encrypted key store (AES-256-GCM, Redis-backed),
+  the watch loop, and the Telegram bot. You enter your key, wallet, and risk
+  levels once in the onboarding form; the key is kept server-side (HttpOnly
+  cookie session), never in the page.
+- `web/` — a TanStack Start (React + Vite + nitro) app that renders that data;
+  the API runs as in-process server functions, so no separate proxy is needed
+  in dev or production.
 
 ```bash
 # The server needs a master key (encrypts stored keys) and Redis. One-time setup:
 #   echo "GUARDIAN_MASTER_KEY=$(openssl rand -hex 32)" >> .env
 #   redis-server &            # or point REDIS_URL at a hosted Redis
 
-# terminal 1 — the API (each user enters their own KeeperHub key in the UI)
+# the dashboard + API + bot, in one process (each user enters their own KeeperHub key in the UI)
 npm run dev:api
 
-# terminal 2 — the dashboard
-cd web && npm install && npm run dev   # then open http://localhost:5173
+# or run the web app standalone in dev (Vite on :3000)
+cd web && npm install && npm run dev
 ```
 
 The dashboard is an **observer** — it never signs or broadcasts. Rescues are executed by the
@@ -105,7 +107,7 @@ alerts, and approvals are demoable behind just a tunnel to the web form.
 ```
 src/agent/       LLM decision layer (repay vs. add-collateral, + amount)
 server/          Hosted API + Telegram bot + event-driven watcher (encrypted key store, watch loop)
-web/             Vite + React dashboard / Telegram Mini App
+web/             TanStack Start (React + Vite + nitro) dashboard / Telegram Mini App
 scripts/         Setup & verification (first-tx dry-run, health checks)
 docs/            Architecture, teardown, and pitch material
 ```

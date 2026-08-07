@@ -90,8 +90,9 @@ is exactly KeeperHub's last-mile problem — which is why this project is built 
 - **`server/` + `web/`** — the hosted face: an observer dashboard **and** a Telegram bot, in one
   node process (port 8787). `server/` holds each user's KeeperHub key **encrypted at rest**
   (AES-256-GCM) in a Redis-backed store (`server/store.ts`), keyed by an HttpOnly cookie for the web
-  session and by verified Telegram user id for the bot. `web/` (Vite + React) is a pure viewer that
-  proxies `/api` to it and doubles as the Telegram Mini App. The browser/chat never sees the key and
+  session and by verified Telegram user id for the bot. `web/` is a TanStack Start (React + Vite +
+  nitro) app — a pure viewer that doubles as the Telegram Mini App, with the API running as
+  in-process server functions. The browser/chat never sees the key and
   never connects or signs a wallet. Execution stays entirely on the KeeperHub side, exactly as the CLI
   path.
 
