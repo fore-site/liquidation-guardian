@@ -7,7 +7,6 @@
  * to issue/clear the cookie on the response.
  */
 import { createMiddleware } from "@tanstack/react-start";
-import { getContext } from "./bootstrap.js";
 import type { GuardianRecord } from "@guardian/server/store.js";
 
 export const COOKIE = "guardian_sid";
@@ -44,6 +43,7 @@ export const sessionMiddleware = createMiddleware({
 /** Resolve the caller's stored record from the sid in context, or null. */
 export async function getSessionRecord(sid: string | null | undefined): Promise<GuardianRecord | null> {
   if (!sid) return null;
+  const { getContext } = await import("./bootstrap.server.js");
   const { store } = getContext();
   return store.getById(sid);
 }

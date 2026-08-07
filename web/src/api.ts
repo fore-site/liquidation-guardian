@@ -73,6 +73,8 @@ export interface Credentials {
 }
 
 // ── Server functions (imported from the server module) ────────────────────────
+// The heavy server logic lives in *.server.ts modules; this module holds the
+// server fns Start compiles into client-safe proxies.
 import {
   closeSessionFn,
   getRescuesFn,

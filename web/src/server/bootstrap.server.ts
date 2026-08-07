@@ -6,6 +6,7 @@
  * bot + watcher are started lazily on first use so they boot exactly once,
  * regardless of which server fn or route triggers the first request.
  */
+import "@tanstack/react-start/server-only";
 import "dotenv/config";
 import { loadServerConfig } from "@guardian/src/config.js";
 import { GuardianStore } from "@guardian/server/store.js";

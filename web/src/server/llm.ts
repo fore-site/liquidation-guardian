@@ -3,6 +3,7 @@
  * OpenAI-compatible provider configured via env (key, base URL, model), with a
  * short per-attempt budget so the watch loop stays fast when it's slow.
  */
+import "@tanstack/react-start/server-only";
 import OpenAI from "openai";
 import type { LlmConfig } from "@guardian/src/agent/guardian.js";
 

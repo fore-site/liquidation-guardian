@@ -21,6 +21,9 @@ declare global {
 }
 
 export function telegramWebApp(): TelegramWebApp | null {
+  // SSR-safe: `window` doesn't exist during server rendering (the Onboarding
+  // component renders server-side), so treat it as "not in Telegram".
+  if (typeof window === "undefined") return null;
   return window.Telegram?.WebApp ?? null;
 }
 

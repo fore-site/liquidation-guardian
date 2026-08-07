@@ -5,7 +5,12 @@
 import { buildSnapshot } from "@guardian/src/agent/guardian.js";
 import { computeCandidates, type AssetPosition, type RescueCandidate } from "@guardian/src/agent/decide.js";
 import type { GuardianRecord } from "@guardian/server/store.js";
-import { getContext } from "./bootstrap.js";
+
+// Bootstrap is server-only (redis, rate-limiter, bot) — reached only from
+// server-side handlers via dynamic import, so keep it out of the client graph.
+async function server() {
+  return import("./bootstrap.server.js");
+}
 
 /** Serialize an AssetPosition (bigint → string) for JSON. */
 function assetDto(a: AssetPosition) {
@@ -34,6 +39,7 @@ function candidateDto(c: RescueCandidate) {
 }
 
 export async function buildStatus(record: GuardianRecord) {
+  const { getContext } = await server();
   const { store } = getContext();
   const kh = store.keeperHubFor(record);
   const position = await kh.readAavePosition(record.chainId, record.wallet);

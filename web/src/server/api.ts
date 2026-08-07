@@ -7,12 +7,20 @@
  * Set-Cookie header rides along; data endpoints return plain JSON.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { getContext, ensureBooted } from "./bootstrap.js";
 import { COOKIE, readSid, sessionCookieHeader, sessionMiddleware } from "./session.js";
 import { verifyInitData } from "@guardian/server/verifyInitData.js";
 import { publicRecord, type GuardianRecord } from "@guardian/server/store.js";
-import { buildStatus } from "./status.js";
 import { getRescues } from "@guardian/server/rescues.js";
+
+// Bootstrap + status are server-only (heavy deps: redis, rate-limiter, bot).
+// Dynamic imports keep them out of the client bundle — the handlers run
+// server-side, where the import resolves.
+async function server() {
+  return import("./bootstrap.server.js");
+}
+async function statusModule() {
+  return import("./status.js");
+}
 
 const CACHE_MS = 10_000;
 const cache = new Map<string, { at: number; value: unknown }>();
@@ -40,6 +48,7 @@ async function limited(key: string, consume: (k: string) => Promise<{ ok: boolea
 // ── GET /api/health ───────────────────────────────────────────────────────────
 
 export const healthFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { getContext, ensureBooted } = await server();
   await ensureBooted();
   const { store } = getContext();
   return { ok: true, redis: store.isReady, time: new Date().toISOString() };
@@ -50,6 +59,7 @@ export const healthFn = createServerFn({ method: "GET" }).handler(async () => {
 export const getSessionFn = createServerFn({ method: "GET" })
   .middleware([sessionMiddleware])
   .handler(async ({ context }) => {
+  const { getContext, ensureBooted } = await server();
   await ensureBooted();
   const sid = (context as unknown as { sid?: string | null }).sid ?? null;
   const record = sid ? await getContext().store.getById(sid) : null;
@@ -71,6 +81,7 @@ export const openSessionFn = createServerFn({ method: "POST" })
     initData?: string;
   })
   .handler(async ({ data, context }) => {
+    const { getContext, ensureBooted } = await server();
     await ensureBooted();
     const { store, cfg, bot, limiters } = getContext();
 
@@ -162,6 +173,7 @@ export const openSessionFn = createServerFn({ method: "POST" })
 export const closeSessionFn = createServerFn({ method: "POST" })
   .middleware([sessionMiddleware])
   .handler(async ({ context }) => {
+  const { getContext, ensureBooted } = await server();
   await ensureBooted();
   const { store } = getContext();
   const sid = (context as unknown as { sid?: string | null }).sid ?? null;
@@ -183,6 +195,7 @@ export const closeSessionFn = createServerFn({ method: "POST" })
 export const getStatusFn = createServerFn({ method: "GET" })
   .middleware([sessionMiddleware])
   .handler(async ({ context }) => {
+  const { getContext, ensureBooted } = await server();
   await ensureBooted();
   const { store, limiters } = getContext();
   const sid = (context as unknown as { sid?: string | null }).sid ?? null;
@@ -202,6 +215,7 @@ export const getStatusFn = createServerFn({ method: "GET" })
   }
   // Dirty flag → bypass the 10s cache so an autonomous rescue shows instantly.
   const dirty = await store.checkAndClearDirty(record.id);
+  const { buildStatus } = await statusModule();
   const status = dirty ? await buildStatus(record) : await cached(`${record.id}:status`, () => buildStatus(record));
   void store.appendHfSnapshot(record.id, status.healthFactor).catch(() => undefined);
   return status;
@@ -212,6 +226,7 @@ export const getStatusFn = createServerFn({ method: "GET" })
 export const getRescuesFn = createServerFn({ method: "GET" })
   .middleware([sessionMiddleware])
   .handler(async ({ context }) => {
+  const { getContext, ensureBooted } = await server();
   await ensureBooted();
   const { store, limiters } = getContext();
   const sid = (context as unknown as { sid?: string | null }).sid ?? null;
