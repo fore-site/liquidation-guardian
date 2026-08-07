@@ -46,14 +46,6 @@ export interface GuardianConfig {
   debtAsset: string;
   /** Symbol of the collateral asset to add more of. */
   collateralAsset: string;
-  /**
-   * Where the KeeperHub monitor workflow hands off when HF < threshold — the
-   * Guardian's decision endpoint. Empty ⇒ the deploy script uses a placeholder
-   * and warns. Not a secret.
-   */
-  guardianWebhookUrl: string;
-  /** Cron for the monitor workflow's Schedule trigger (UTC). */
-  scheduleCron: string;
   /** Telegram bot token from @BotFather. Empty ⇒ the bot + watch loop don't start. */
   telegramBotToken: string;
   /** Public HTTPS URL the Mini App is served from (registered with @BotFather). */
@@ -88,8 +80,6 @@ export function loadConfig(opts: { requireLlm?: boolean } = {}): GuardianConfig 
     // On Sepolia only LINK is borrowable, so the demo position is LINK/LINK.
     debtAsset: optional("DEBT_ASSET", "LINK"),
     collateralAsset: optional("COLLATERAL_ASSET", "LINK"),
-    guardianWebhookUrl: optional("GUARDIAN_WEBHOOK_URL", ""),
-    scheduleCron: optional("SCHEDULE_CRON", "*/10 * * * *"),
     telegramBotToken: optional("TELEGRAM_BOT_TOKEN", ""),
     webAppUrl: optional("WEBAPP_URL", ""),
     guardianMasterKey: optional("GUARDIAN_MASTER_KEY", ""),

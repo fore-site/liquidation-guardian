@@ -152,25 +152,23 @@ Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
   coverage") would save the guessing.
 
 ### [F11] Deploying a workflow by API: HTTP-Request is Pro-gated, and there's no REST create
-- **Hit:** Building the "watches" half — a Schedule → read Aave HF → Condition → HTTP-POST-to-Guardian
-  workflow — two things bit in a row. (1) **No REST create:** `POST /api/workflows` returns
-  `405 Method Not Allowed`. `GET`, `PATCH /:id`, and `DELETE /:id` all work, but creation is only via
-  the MCP `create_workflow` tool or the web UI. (2) **HTTP Request is a paid node:** pushing the graph
-  with the HTTP-Request handoff returns `402 { code: "upgrade_required", violations: [{ featureId:
-  "action.http-request", requiredPlan: "pro" }] }`. Schedule, the Aave protocol read, and Condition
-  are all free; only the outbound webhook needs Pro.
-- **Confusing because:** The MCP/REST surfaces look interchangeable, so you reach for `POST /workflows`
-  and get a bare 405 with no hint that create lives elsewhere. And the plan gate only trips on *write*
-  of the full graph — `list_action_schemas` shows HTTP Request with no tier marker, so you don't learn
-  it's Pro until the 402. A `DELETE` of an existing workflow with run history is also refused
-  (`"delete executions first"`) with no documented endpoint to purge executions.
-- **Fix (mine):** Define the graph in code as the source of truth
-  ([src/workflows/liquidation-monitor.ts](../src/workflows/liquidation-monitor.ts)) and **deploy by
-  PATCH-in-place**: overwrite an existing workflow object (the approved stub) with the new graph,
-  reusing its id — sidesteps both the missing REST create and the un-deletable-with-history rule. The
-  handoff node is optional (`includeHandoff`): default off for the free plan (the Guardian is triggered
-  out-of-band), on for Pro. The deploy script attempts the Pro node with `--with-http` and falls back
-  to the free watcher on a 402, so it works on either plan.
+- **Hit:** Building the original "watches" half — a Schedule → read Aave HF → Condition →
+  HTTP-POST-to-Guardian workflow — two things bit in a row. (1) **No REST create:** `POST
+  /api/workflows` returns `405 Method Not Allowed`. `GET`, `PATCH /:id`, and `DELETE /:id` all
+  work, but creation is only via the MCP `create_workflow` tool or the web UI. (2) **HTTP Request
+  is a paid node:** pushing the graph with the HTTP-Request handoff returns `402 { code:
+  "upgrade_required", violations: [{ featureId: "action.http-request", requiredPlan: "pro" }] }`.
+  Schedule, the Aave protocol read, and Condition are all free; only the outbound webhook needs Pro.
+- **Confusing because:** The MCP/REST surfaces look interchangeable, so you reach for `POST
+  /workflows` and get a bare 405 with no hint that create lives elsewhere. And the plan gate only
+  trips on *write* of the full graph — `list_action_schemas` shows HTTP Request with no tier marker,
+  so you don't learn it's Pro until the 402. A `DELETE` of an existing workflow with run history is
+  also refused (`"delete executions first"`) with no documented endpoint to purge executions.
+- **Fix (mine):** I eventually **deprecated the KeeperHub workflow entirely** and moved watching to
+  our own event-driven watcher (`server/event-watcher.ts`) — it reacts to Aave Pool events within
+  ~1 block, needs no Pro tier, no workflow API, and keeps the watch in our own process with the
+  decision+execution half. The workflow experiment is documented here only for the record; the code
+  (`src/workflows/`, `scripts/deploy-workflow.ts`) was removed.
 - **Proposed fix for KeeperHub:** (a) Either expose `POST /api/workflows` for create or make the 405
   point at the MCP/UI path. (b) Surface plan tiers in `list_action_schemas` (a `requiredPlan` field)
   so gating is visible before a write. (c) Document an executions-purge endpoint, or allow

@@ -15,45 +15,46 @@ The fix is mechanical but must happen *fast and reliably*: either **repay some d
 collateral** to push the health factor back up. That "must happen reliably, onchain, right now"
 is exactly KeeperHub's last-mile problem — which is why this project fits the brief's thesis.
 
-## Design principle: workflow watches, LLM decides
+## Design principle: event watcher watches, LLM decides
 
 ```
                         ┌─────────────────────────────────────────────┐
-   always-on, cheap,    │  KeeperHub Workflow  (deterministic)         │
-   never sleeps,        │                                              │
-   retries built in     │   [Block/Schedule Trigger]                   │
+   always-on, cheap,    │  Event-Driven Watcher  (deterministic)      │
+   never sleeps,        │  server/event-watcher.ts                    │
+   reacts to the chain  │                                              │
+                        │  [Poll Aave Pool logs — Supply/Repay/Borrow/ │
+                        │   Withdraw/Liquidation/ReserveDataUpdated]  │
                         │            │                                 │
                         │            ▼                                 │
-                        │   [Action: read Aave health factor]  ◄─ aave-v3/get-user-account-data
+                        │   [Re-read affected positions' health factor]│
+                        │   (via KeeperHub aave-v3/get-user-account-data)
                         │            │                                 │
                         │            ▼                                 │
-                        │   [Condition: HF < THRESHOLD ?]              │
-                        │        │ false → end (cheap, no-op)          │
-                        │        │ true                                │
-                        └────────┼─────────────────────────────────────┘
-                                 ▼  handoff (HTTP webhook on Pro,
-                                 ▼   out-of-band trigger on free)
+                        │   [HF < THRESHOLD ?]  ── false → no-op       │
+                        │            │ true                            │
+                        └────────────┼────────────────────────────────┘
+                                     ▼  handoff (same process → bot.runCheck)
    engages only when     ┌─────────────────────────────────────────────┐
    there's a real        │  LLM Decision Layer  (OpenAI-compatible)     │
    decision to make      │                                              │
-                        │  Inputs: HF, collateral, debt, wallet        │
-                        │  balances + Aave Pool allowance, gas cost     │
-                        │  per lever (when the RPC provides a price)    │
-                        │  Decides: repay vs add-collateral, + amount   │
-                        │  to restore HF to TARGET at lowest cost       │
-                        └────────┬─────────────────────────────────────┘
-                                 ▼
-                        ┌─────────────────────────────────────────────┐
+                         │  Inputs: HF, collateral, debt, wallet        │
+                         │  balances + Aave Pool allowance, gas cost     │
+                         │  per lever (when the RPC provides a price)    │
+                         │  Decides: repay vs add-collateral, + amount   │
+                         │  to restore HF to TARGET at lowest cost       │
+                         └────────┬─────────────────────────────────────┘
+                                  ▼
+                         ┌─────────────────────────────────────────────┐
    the "last mile" —     │  KeeperHub Execution                         │
    KeeperHub owns this   │                                              │
-                        │  1. simulate:true  → gas estimate + revert   │
-                        │     check, no broadcast                      │
-                        │  2. if clean → execute_protocol_action       │
-                        │     (aave-v3/repay OR aave-v3/supply)        │
-                        │  3. gas backoff + retries on failure         │
-                        │  4. audit trail: trigger→sim→tx→gas→outcome  │
-                        │  5. notify (Discord/Telegram)                │
-                        └─────────────────────────────────────────────┘
+                         │  1. simulate:true  → gas estimate + revert   │
+                         │     check, no broadcast                      │
+                         │  2. if clean → execute_protocol_action       │
+                         │     (aave-v3/repay OR aave-v3/supply)        │
+                         │  3. gas backoff + retries on failure         │
+                         │  4. audit trail: trigger→sim→tx→gas→outcome  │
+                         │  5. notify (Discord/Telegram)                │
+                         └─────────────────────────────────────────────┘
 ```
 
 **How this split maps onto the judging criteria:**
@@ -61,17 +62,17 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
 | Criterion | How this design hits it |
 |---|---|
 | Executes onchain via KeeperHub | `execute_protocol_action` (aave-v3) is a real tx; every rebalance is linkable |
-| Use of KeeperHub surfaces | Workflow builder, conditions, protocol plugins, simulate, audit trail, notifications |
-| Reliability & observability | Deterministic monitor + simulate-first + gas backoff + retries + audit trail = the core loop |
+| Use of KeeperHub surfaces | Protocol plugins, simulate, audit trail, notifications, execution |
+| Reliability & observability | Event-driven monitor + bot watch-loop backup + simulate-first + gas backoff + retries + audit trail = the core loop |
 | Originality & usefulness | "Don't get liquidated while you sleep" is a use case people actually run |
 | Integration quality | Clean separation: KeeperHub owns execution, LLM owns judgment, thin glue |
 
 ## Components
 
-- **`src/workflows/`** — the KeeperHub monitor definition, built in code
-  ([liquidation-monitor.ts](../src/workflows/liquidation-monitor.ts)) as the reproducible source of
-  truth, with the pushed graph checked in as `liquidation-monitor.json`. Deployed by
-  [scripts/deploy-workflow.ts](../scripts/deploy-workflow.ts) (`npm run deploy-workflow`).
+- **`server/event-watcher.ts`** — the primary, always-on watcher. Polls the Aave Pool's logs for
+  the events that move a health factor and re-checks affected positions immediately, handing off
+  to the decision layer when one drops below the act-threshold. The bot's watch loop is the
+  deterministic backup.
 - **`src/agent/`** — the LLM decision layer. Receives position snapshot, returns a structured
   decision `{ action: "repay"|"supply", token, amount, reasoning }`, then calls KeeperHub to execute.
   Lever executability is checked before the LLM: repay/supply are only offered when the wallet
@@ -85,7 +86,7 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
   capital-efficiency guidance. On Sepolia gas is sponsored by KeeperHub (often $0), so the figure
   is mostly informational there — but the mechanism is real and matters on chains without
   sponsorship.
-- **`scripts/`** — setup & verification: first-tx dry-run, health checks, sizing tests, workflow deploy.
+- **`scripts/`** — setup & verification: first-tx dry-run, health checks, sizing tests.
 - **`server/` + `web/`** — the hosted face: an observer dashboard **and** a Telegram bot, in one
   node process (port 8787). `server/` holds each user's KeeperHub key **encrypted at rest**
   (AES-256-GCM) in a Redis-backed store (`server/store.ts`), keyed by an HttpOnly cookie for the web
@@ -130,46 +131,24 @@ Telegram ──Mini App (web form + initData)──▶ POST /api/session ──�
   fail the auth tag, and that the serialized blob holds no plaintext `kh_`. Exits non-zero on any miss.
 
 
-## The deployed monitor (the "watches" half)
+## The event-driven watcher (the primary "watches" half)
 
-Live on the account as **"Liquidation Guardian — Monitor"** (Sepolia, id `7s6n67keu1a60ra34jdzm`),
-created **disabled** so no schedule fires until it's turned on. It's the deterministic watcher, three
-nodes:
-
-```
-[Schedule */10 * * * * UTC] → [aave-v3/get-user-account-data] → [Condition: healthFactor < 1.15e18]
-```
-
-Two deploy-time realities shaped it (TEARDOWN F11):
-
-- **No REST create.** `POST /api/workflows` returns 405 — creation is MCP/UI only. So the deploy
-  script pushes the graph by **PATCH-in-place**, overwriting an existing workflow object (the approved
-  stub) and reusing its id. `GET`/`PATCH`/`DELETE` on `/workflows/:id` all work.
-- **The webhook handoff is a Pro node.** The true branch's ideal next step is an HTTP POST of the
-  position snapshot to the Guardian, but `action.http-request` is gated behind KeeperHub Pro (a live
-  402 confirmed it). On the free plan the graph ends at the Condition and the Guardian is triggered
-  **out-of-band**; the builder's `includeHandoff` flag (and `deploy-workflow --with-http`) adds the
-  in-workflow webhook once on Pro. Either way, KeeperHub still owns the watch, the branch, and the
-  execution — only the workflow→Guardian hop moves outside on the free tier.
-
-## The event-driven watcher (the reactive trigger)
-
-Alongside the scheduled workflow and the bot's watch loop, the server runs an **event-driven
+The always-on watching is **not** a KeeperHub workflow anymore — that was a deprecated experiment
+(a Schedule → read Aave HF → Condition graph). The production watcher is our own **event-driven
 watcher** (`server/event-watcher.ts`): it polls the Aave Pool's logs for the events that actually
 move a position's health factor — `Supply`, `Repay`, `Borrow`, `Withdraw`, `LiquidationCall`, and
 (oracle price updates) `ReserveDataUpdated` — and re-checks the affected positions immediately.
 
 This is the difference between *reacting to the chain* and *waiting for the clock*: a relevant
 event (a big withdraw, a liquidation, an oracle move) triggers a KeeperHub re-read of every stored
-position within ~1 block of the change, instead of up to `WATCH_INTERVAL_MS` (60s) for the bot loop
-or `*/10` minutes for the workflow. The topic hashes are keccak256 of the canonical Aave v3 Pool
-event signatures, cross-verified against live Sepolia logs.
+position within ~1 block of the change, instead of up to `WATCH_INTERVAL_MS` (60s) for the bot loop.
+The topic hashes are keccak256 of the canonical Aave v3 Pool event signatures, cross-verified
+against live Sepolia logs.
 
 Layering (belt and suspenders, matching the reliability story):
 
 1. **Event-driven watcher** — the fast reactive layer; reacts within ~1 block.
 2. **Bot watch loop** — the deterministic backup; re-reads every position on a schedule.
-3. **KeeperHub workflow** — the platform-surface "watches" half (the KeeperHub surface a judge sees).
 
 The price-event topic (`ReserveDataUpdated`) fires constantly (oracle heartbeats), so it is
 **throttled** (`PRICE_EVENT_THROTTLE_MS`, default 30s) — it only triggers a re-check if no other
@@ -177,6 +156,11 @@ event has fired within the window. Per-position re-reads are coalesced (`MIN_RE_
 15s) so an event burst never hammers KeeperHub's rate limit. The watcher never executes anything
 itself — it only *fires the existing check path sooner* (`bot.runCheck`), so the decision and
 execution pipeline is unchanged.
+
+The RPC reads behind this (pool event logs, `eth_blockNumber`, rescue-history backfill) go through a
+provider-rotating client (`server/rescues.ts`) that fails over between RPC endpoints, cools down a
+flaky provider for 60s, and paces in-flight requests — so a single flaky public node can't stall
+the watch.
 
 ## Execution safety: simulate before broadcast
 

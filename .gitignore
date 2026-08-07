@@ -23,6 +23,11 @@ web/.output/
 .vscode/
 .idea/
 
+# Agent tooling state (session memory, settings, reference screenshots)
+.commandcode/
+.claude/
+screenshots/
+
 # Playwright smoke-test artifacts
 .playwright-mcp/
 

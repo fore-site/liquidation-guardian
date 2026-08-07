@@ -26,7 +26,7 @@ export function Landing() {
           </div>
         </div>
         <Button asChild size="lg" className="rounded-full">
-          <a href="/start">Get started</a>
+          <a href="/onboard">Get started</a>
         </Button>
       </nav>
 
@@ -42,7 +42,7 @@ export function Landing() {
         </p>
         <div className="mt-10 flex items-center justify-center gap-4">
           <Button asChild size="lg" className="rounded-full">
-            <a href="/start">Get started</a>
+            <a href="/onboard">Get started</a>
           </Button>
           <Button asChild size="lg" variant="outline" className="rounded-full">
             <a href="#calculator">See the math</a>

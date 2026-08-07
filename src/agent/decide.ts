@@ -1,11 +1,12 @@
 /**
  * The rescue decision + sizing layer.
  *
- * The KeeperHub workflow does the always-on watching; this module engages only once
- * a position is actually at risk. Two jobs: (1) size each possible rescue lever
- * deterministically, in token base units; (2) let the model pick which lever/asset
- * and explain it. The model owns the *choice + rationale*; the arithmetic is done in
- * code and never trusts a model-produced number.
+ * The event-driven watcher (server/event-watcher.ts) does the always-on watching;
+ * this module engages only once a position is actually at risk. Two jobs: (1) size
+ * each possible rescue lever deterministically, in token base units; (2) let the
+ * model pick which lever/asset and explain it. The model owns the *choice +
+ * rationale*; the arithmetic is done in code and never trusts a model-produced
+ * number.
  *
  * ## Sizing math — exact where it can be, oracle-priced only where it must be
  *

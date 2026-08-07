@@ -54,6 +54,8 @@ export interface SessionConfig {
   chainId: string;
   hfThreshold: number;
   hfTarget: number;
+  /** Telegram username the record is bound to, or null when not bound. */
+  telegramUsername?: string | null;
 }
 
 export interface SessionState {
@@ -81,7 +83,11 @@ import {
   getRescuesFn,
   getSessionFn,
   getStatusFn,
+  getTelegramLinkFn,
   openSessionFn,
+  resumeSessionFn,
+  stopWatchingFn,
+  unbindTelegramFn,
 } from "./server/api.js";
 
 /**
@@ -106,6 +112,27 @@ export const openSession = (creds: Credentials) =>
   openSessionFn({ data: creds }).then((r) => unwrap<SessionState>(r));
 
 export const closeSession = () => closeSessionFn().then((r) => unwrap<SessionState>(r));
+
+/**
+ * Permanently delete the stored record (key + config) and log out. Destructive —
+ * the user must onboard again. Mirrors the bot's /stop.
+ */
+export const stopWatching = () => stopWatchingFn().then((r) => unwrap<SessionState>(r));
+
+/** Create a one-time Telegram link code + bot username (for the t.me deep link). */
+export const getTelegramLink = () =>
+  getTelegramLinkFn().then((r) => unwrap<{ code: string; botUsername: string | null }>(r));
+
+/** Unbind Telegram from the record (dashboard keeps watching). Mirrors /logout. */
+export const unbindTelegram = () => unbindTelegramFn().then((r) => unwrap<SessionState>(r));
+
+/**
+ * Resume a stored session for a wallet that already onboarded (no key needed).
+ * Throws a 404 when no record exists for that wallet — the UI falls back to full
+ * onboarding.
+ */
+export const resumeSession = (input: { wallet: string; chainId?: string; initData?: string }) =>
+  resumeSessionFn({ data: input }).then((r) => unwrap<SessionState>(r));
 
 export const getStatus = () => getStatusFn().then((r) => unwrap<Status>(r));
 

@@ -55,7 +55,7 @@ export function ensureBooted(): Promise<void> {
         llm: context.llm,
         // The Mini App opens the dashboard route; the root is the landing.
         webAppUrl: context.cfg.webAppUrl
-          ? `${context.cfg.webAppUrl.replace(/\/$/, "")}/app`
+          ? `${context.cfg.webAppUrl.replace(/\/$/, "")}/dashboard`
           : "",
         watchIntervalMs: context.cfg.watchIntervalMs,
       });
@@ -67,7 +67,6 @@ export function ensureBooted(): Promise<void> {
     if (process.env.EVENT_WATCH_ENABLED !== "false" && context.bot) {
       const watcher = new EventWatcher({
         store: context.store,
-        rpcUrl: process.env.SEPOLIA_RPC_URL?.trim() || "https://ethereum-sepolia.publicnode.com",
         pollMs: Number(process.env.EVENT_POLL_MS || 5000),
         minReReadMs: Number(process.env.MIN_RE_READ_MS || 15000),
         priceThrottleMs: Number(process.env.PRICE_EVENT_THROTTLE_MS || 30000),

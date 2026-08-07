@@ -2,8 +2,8 @@
  * Liquidation Guardian — orchestration loop.
  *
  * This is the "LLM decides, KeeperHub executes" half of the system. The always-on
- * watching is a deterministic KeeperHub workflow (see src/workflows/); this process
- * is what that workflow hands off to once a position is actually at risk.
+ * watching is the event-driven watcher in server/ (see server/event-watcher.ts);
+ * this process is what that watcher hands off to once a position is at risk.
  *
  * Flow:  read position → if HF < threshold → read exact token balances →
  *        ask the LLM which lever to pull → size it in token units (no oracle) →
@@ -28,8 +28,6 @@ import { runAgenticRescue } from "./agent.js";
 import { SEPOLIA_POOL, SEPOLIA_RESERVES, VARIABLE_RATE_MODE, type ReserveInfo } from "./assets.js";
 import { readPriceUsd } from "./prices.js";
 import { rpc } from "../../server/rescues.js";
-
-const DEFAULT_RPC = process.env.SEPOLIA_RPC_URL?.trim() || "https://ethereum-sepolia.publicnode.com";
 
 const logger = createLogger("guardian");
 /** Human-facing pass log (plain console lines for the CLI demo). */
@@ -330,7 +328,7 @@ export async function buildSnapshot(
   let gasPriceGwei: number | null = null;
   let ethPriceUsd: number | null = null;
   try {
-    const gasRaw = await rpc(DEFAULT_RPC, "eth_gasPrice", []);
+    const gasRaw = await rpc("eth_gasPrice", []);
     if (typeof gasRaw === "string") {
       gasPriceGwei = Number(BigInt(gasRaw)) / 1e9; // wei → Gwei
     }

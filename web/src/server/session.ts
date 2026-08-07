@@ -21,7 +21,7 @@ export function readSid(request: Request): string | null {
 }
 
 export function sessionCookieHeader(id: string, clear = false): string {
-  const maxAge = clear ? 0 : 12 * 60 * 60; // 12h cookie; the record persists in the store.
+  const maxAge = clear ? 0 : 30 * 24 * 60 * 60; // 30-day session; the record persists in the store.
   return `${COOKIE}=${clear ? "" : id}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
 }
 

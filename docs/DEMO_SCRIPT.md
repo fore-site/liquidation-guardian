@@ -32,7 +32,7 @@ npm run dev:web           # terminal 2 — dashboard on :5173 (proxies /api)
 
 | # | Shot | What's on screen | Narrator says (or on-screen text) |
 |---|---|---|---|
-| 1 | Repo + README (10s) | `git log --oneline`, README top | "Workflow watches, LLM decides, KeeperHub executes. A KeeperHub workflow tracks the Aave health factor; when it nears liquidation, an LLM picks the cheapest fix and KeeperHub executes it onchain — simulated first, never blind." |
+| 1 | Repo + README (10s) | `git log --oneline`, README top | "Event watcher watches, LLM decides, KeeperHub executes. Our event-driven watcher tracks the Aave pool's events; when the health factor nears liquidation, an LLM picks the cheapest fix and KeeperHub executes it onchain — simulated first, never blind." |
 | 2 | Open an at-risk position (30s) | `npm run setup-position` | "Sepolia only lets us demo a single-asset LINK position, which is actually the cleanest case: the rescue amount is exact token math, no oracle." Ends with **HF just above 1.0**. |
 | 3 | **The money shot — LLM decides** (40s) | `npm run guardian -- --dry-run` | "HF is below the 1.15 threshold. The decision layer asks the hosted LLM (OpenAI-compatible provider) which lever to pull — repay debt or add collateral — and why. It weighs the cost of each fix, including the gas estimate. Amounts are still computed in code; the model owns the choice + rationale." Freeze on the `Decision: repay <n> LINK — <model reasoning>` line. Must NOT say "Deterministic fallback". |
 | 4 | Live rescue (40s) | `npm run guardian` (real) | "Same decision, real execution. KeeperHub simulates first — clean — then broadcasts and confirms. Here's the tx." Freeze on the `transactionLink`. |
@@ -49,7 +49,7 @@ All three items are **mandatory** — a submission missing any one can't be judg
 - [ ] **Demo video link** (hosted — YouTube/Loom; ~3 min, follow the script above).
 - [ ] **Real KeeperHub-executed tx link** — from step 4. Etherscan link for the rescue, e.g.
       `https://sepolia.etherscan.io/tx/<hash>`.
-- [ ] Project name + tagline: **Liquidation Guardian** — "workflow watches, LLM decides, KeeperHub
+- [ ] Project name + tagline: **Liquidation Guardian** — "event watcher watches, LLM decides, KeeperHub
       executes."
 - [ ] Description: paragraph + the architecture docs link. Shortlist is judged from this + the pitch.
 

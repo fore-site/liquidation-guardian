@@ -8,8 +8,8 @@
  * dropped below threshold — so the Guardian reacts within ~1 block of an onchain
  * change instead of waiting for the next clock tick.
  *
- * This is the *reactive* layer; the bot's watch loop and the KeeperHub workflow
- * remain as deterministic backup (belt and suspenders).
+ * This is the *primary* watcher — the fast reactive layer; the bot's watch loop
+ * remains as the deterministic backup.
  *
  * Design notes:
  *  - Only topic0 (event signature) is matched — no ABI decoding needed. The
@@ -58,7 +58,6 @@ const CATCHUP_BLOCKS = 200;
 export interface EventWatcherOptions {
   /** Shared store of watched positions — re-read via `store.all()`. */
   store: GuardianStore;
-  rpcUrl: string;
   /** How often to poll the Pool for new events, ms. */
   pollMs?: number;
   /** Coalesce per-position re-reads to at most one per this window, ms. */
@@ -79,7 +78,6 @@ export interface EventWatcherOptions {
  */
 export class EventWatcher {
   private readonly store: GuardianStore;
-  private readonly rpcUrl: string;
   private readonly pollMs: number;
   private readonly minReReadMs: number;
   private readonly priceThrottleMs: number;
@@ -94,7 +92,6 @@ export class EventWatcher {
 
   constructor(opts: EventWatcherOptions) {
     this.store = opts.store;
-    this.rpcUrl = opts.rpcUrl;
     this.pollMs = opts.pollMs ?? 5_000;
     this.minReReadMs = opts.minReReadMs ?? 15_000;
     this.priceThrottleMs = opts.priceThrottleMs ?? 30_000;
@@ -151,7 +148,7 @@ export class EventWatcher {
 
   private async tick(): Promise<void> {
     // Discover the latest block once per tick.
-    const latestRaw = await rpc(this.rpcUrl, "eth_blockNumber", []);
+    const latestRaw = await rpc("eth_blockNumber", []);
     const latest = typeof latestRaw === "string" ? parseInt(latestRaw, 16) : 0;
     if (latest <= this.lastSeenBlock) return;
 
@@ -162,8 +159,8 @@ export class EventWatcher {
     const to = latest;
 
     const [userLogs, priceLogs] = await Promise.all([
-      getPoolLogs(this.rpcUrl, USER_EVENT_TOPICS, from, to),
-      getPoolLogs(this.rpcUrl, [PRICE_EVENT_TOPIC], from, to),
+      getPoolLogs(USER_EVENT_TOPICS, from, to),
+      getPoolLogs([PRICE_EVENT_TOPIC], from, to),
     ]);
 
     const userHit = userLogs.length > 0;
@@ -201,8 +198,8 @@ export class EventWatcher {
     if (records.length === 0) return;
     const wallets = new Set(records.map((r) => r.wallet.toLowerCase()));
     const [repays, supplies] = await Promise.all([
-      getPoolLogs(this.rpcUrl, [REPAY_TOPIC], from, to),
-      getPoolLogs(this.rpcUrl, [SUPPLY_TOPIC], from, to),
+      getPoolLogs([REPAY_TOPIC], from, to),
+      getPoolLogs([SUPPLY_TOPIC], from, to),
     ]);
     const byWallet = new Map<string, Array<{ type: "repay" | "supply"; block: number }>>();
     for (const log of repays) {
@@ -260,7 +257,6 @@ function topicToAddress(topic: string): string {
  * public-RPC range cap. Best-effort per window.
  */
 async function getPoolLogs(
-  rpcUrl: string,
   topics: string[],
   from: number,
   to: number,
@@ -269,7 +265,7 @@ async function getPoolLogs(
   for (let start = from; start <= to; start += MAX_RANGE + 1) {
     const end = Math.min(start + MAX_RANGE, to);
     try {
-      const res = await rpc(rpcUrl, "eth_getLogs", [
+      const res = await rpc("eth_getLogs", [
         {
           address: SEPOLIA_POOL,
           fromBlock: "0x" + start.toString(16),

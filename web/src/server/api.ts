@@ -169,19 +169,19 @@ export const openSessionFn = createServerFn({ method: "POST" })
   });
 
 // ── DELETE /api/session ───────────────────────────────────────────────────────
+// Logs THIS browser out: clears the session cookie + cached reads. The stored
+// record (encrypted key + config) is KEPT, so the user can resume from another
+// browser or via the resume flow — and the bot keeps watching a Telegram-bound
+// record. The only way to delete the record is the bot's /stop or an explicit
+// delete action.
 
 export const closeSessionFn = createServerFn({ method: "POST" })
   .middleware([sessionMiddleware])
   .handler(async ({ context }) => {
-  const { getContext, ensureBooted } = await server();
+  const { ensureBooted } = await server();
   await ensureBooted();
-  const { store } = getContext();
   const sid = (context as unknown as { sid?: string | null }).sid ?? null;
   if (sid) {
-    const record = await store.getById(sid);
-    // A pure web session: forget the credential. A Telegram-bound record stays
-    // so the bot keeps watching — /stop in the bot removes that one.
-    if (record && record.telegramUserId == null) await store.remove(sid);
     for (const k of cache.keys()) if (k.startsWith(`${sid}:`)) cache.delete(k);
   }
   return new Response(JSON.stringify({ authenticated: false }), {
@@ -189,6 +189,75 @@ export const closeSessionFn = createServerFn({ method: "POST" })
     headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookieHeader("", true) },
   });
 });
+
+// ── POST /api/session/stop ────────────────────────────────────────────────────
+// Permanently deletes the stored record (encrypted key + config + indexes) and
+// clears the session cookie. Destructive — the user must onboard again to be
+// watched. Mirrors the bot's /stop. (The bot keeps a Telegram-bound record's
+// chat binding; this deletes the whole record, so the bot stops too.)
+
+export const stopWatchingFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+    const { getContext, ensureBooted } = await server();
+    await ensureBooted();
+    const { store } = getContext();
+    const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+    if (sid) {
+      await store.remove(sid).catch(() => undefined);
+      for (const k of cache.keys()) if (k.startsWith(`${sid}:`)) cache.delete(k);
+    }
+    return new Response(JSON.stringify({ authenticated: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookieHeader("", true) },
+    });
+  });
+
+// ── POST /api/session/telegram-link ───────────────────────────────────────────
+// Create a one-time, 5-minute link code that authorizes binding THIS record to a
+// Telegram chat. The code rides in a t.me deep link (`?start=link_<code>`); the
+// bot consumes it and binds the sender's Telegram user to the record. Returns the
+// code + bot username so the client can build the deep link.
+
+export const getTelegramLinkFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+    const { getContext, ensureBooted } = await server();
+    await ensureBooted();
+    const { store, bot } = getContext();
+    const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+    const record = sid ? await store.getById(sid) : null;
+    if (!record) {
+      return new Response(JSON.stringify({ error: "Not connected." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const code = await store.createLinkCode(record.id);
+    return { code, botUsername: bot?.username ?? null };
+  });
+
+// ── POST /api/session/telegram-unbind ──────────────────────────────────────────
+// Unbind the record from Telegram (keeps the record; the bot stops alerting this
+// chat). The dashboard keeps watching. Mirrors the bot's /logout.
+
+export const unbindTelegramFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+    const { getContext, ensureBooted } = await server();
+    await ensureBooted();
+    const { store } = getContext();
+    const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+    if (!sid) {
+      return new Response(JSON.stringify({ error: "Not connected." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const record = await store.unbindTelegram(sid);
+    cache.delete(`${sid}:status`);
+    return record ? { authenticated: true, config: publicRecord(record) } : { authenticated: false };
+  });
 
 // ── GET /api/status ───────────────────────────────────────────────────────────
 
@@ -264,6 +333,83 @@ export const getHfHistoryFn = createServerFn({ method: "GET" })
       });
     }
     return store.getHfSnapshots(record.id);
+  });
+
+// ── POST /api/session/resume ────────────────────────────────────────────────
+// Re-issues the session cookie for a wallet that already onboarded (the record +
+// encrypted key persist in the store), so returning users don't re-enter their
+// KeeperHub key. Requires the wallet + chainId; optionally re-binds/verifies the
+// Telegram initData when opened from the bot. 404 when no record exists — the UI
+// falls back to full onboarding.
+
+export const resumeSessionFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .validator((d: unknown) => d as { wallet: string; chainId?: string; initData?: string })
+  .handler(async ({ data, context }) => {
+    const { getContext, ensureBooted } = await server();
+    await ensureBooted();
+    const { store, cfg, bot, limiters } = getContext();
+
+    const ip = (context as unknown as { ip?: string }).ip ?? "unknown";
+    const rl = await limited(ip, limiters.sessionPost);
+    if (rl.limited) {
+      return new Response(JSON.stringify({ error: `Rate limit exceeded. Retry in ${rl.retryAfterSec}s.` }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": String(rl.retryAfterSec) },
+      });
+    }
+
+    const wallet = String(data.wallet ?? "").trim();
+    const chainId = String(data.chainId ?? "11155111").trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+      return json(400, { error: "Enter a valid wallet address (0x + 40 hex characters)." });
+    }
+
+    const record = await store.getByWallet(wallet, chainId);
+    if (!record) {
+      return new Response(JSON.stringify({ error: "No stored position for that wallet — onboard first." }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // If initData came in (Telegram), verify + (re)bind the record to that user.
+    let boundChat: number | null = null;
+    if (typeof data.initData === "string" && data.initData) {
+      if (!cfg.telegramBotToken) {
+        return json(400, { error: "Telegram onboarding isn't enabled on this server." });
+      }
+      const verified = verifyInitData(data.initData, cfg.telegramBotToken);
+      if (!verified) {
+        return json(400, { error: "Couldn't verify your Telegram session. Reopen the app and retry." });
+      }
+      if (record.telegramUserId !== verified.userId) {
+        const rebound = await store.upsertByWallet({
+          wallet: record.wallet,
+          chainId: record.chainId,
+          keeperHubApiKey: store.decrypt(record.encKey),
+          hfThreshold: record.hfThreshold,
+          hfTarget: record.hfTarget,
+          telegramUserId: verified.userId,
+          telegramChatId: verified.userId,
+          telegramUsername: verified.username,
+        });
+        boundChat = verified.userId;
+        if (bot) void bot.notifyOnboarded(rebound);
+      }
+    }
+
+    cache.delete(`${record.id}:status`);
+    void store.setDirty(record.id).catch(() => undefined);
+    if (boundChat != null) void store.appendHfSnapshot(record.id, NaN).catch(() => undefined);
+
+    return new Response(
+      JSON.stringify({ authenticated: true, config: publicRecord(await store.getById(record.id) ?? record) }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookieHeader(record.id) },
+      },
+    );
   });
 
 function json(status: number, body: unknown): Response {

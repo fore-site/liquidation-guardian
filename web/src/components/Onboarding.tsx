@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { openSession, type Credentials, type SessionConfig } from "../api.js";
+import { openSession, resumeSession, type Credentials, type SessionConfig } from "../api.js";
 import { initTelegram, isInTelegram, telegramInitData } from "../telegram.js";
 import { Button } from "./ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card.js";
@@ -13,6 +13,10 @@ import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.js";
  * then hands the key to the server ONCE (it's held server-side, never stored in the
  * browser). No terminal, no .env, no code.
  *
+ * Returning users (who already onboarded — the record persists server-side) can
+ * **resume** with just their wallet address: the server re-issues the session
+ * cookie without asking for the key again.
+ *
  * When opened inside Telegram (the bot's Mini App), it also forwards the signed
  * `initData` so the server can bind the credential to the verified Telegram user.
  */
@@ -25,6 +29,8 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inTelegram = isInTelegram();
+  const [resumeWallet, setResumeWallet] = useState("");
+  const [resumeBusy, setResumeBusy] = useState(false);
 
   useEffect(() => {
     initTelegram();
@@ -58,12 +64,34 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
       const { config } = await openSession(creds);
       if (config) {
         if (onConnected) onConnected(config);
-        else window.location.href = "/app";
+        else window.location.href = "/dashboard";
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't connect");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Resume an existing stored session — wallet only, no key re-entry. */
+  async function resume(e: React.FormEvent) {
+    e.preventDefault();
+    setResumeBusy(true);
+    setError(null);
+    try {
+      const { config } = await resumeSession({
+        wallet: resumeWallet.trim(),
+        chainId: "11155111",
+        ...(inTelegram ? { initData: telegramInitData() } : {}),
+      });
+      if (config) {
+        if (onConnected) onConnected(config);
+        else window.location.href = "/dashboard";
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't find that wallet — connect it first.");
+    } finally {
+      setResumeBusy(false);
     }
   }
 
@@ -80,6 +108,32 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Resume a stored session — wallet only, no key re-entry. */}
+          <form onSubmit={resume} className="space-y-3">
+            <Label htmlFor="resume-wallet">Already connected? Resume monitoring</Label>
+            <div className="flex gap-2">
+              <Input
+                id="resume-wallet"
+                type="text"
+                placeholder="0x…"
+                value={resumeWallet}
+                onChange={(e) => setResumeWallet(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                required
+              />
+              <Button type="submit" variant="outline" disabled={resumeBusy}>
+                {resumeBusy ? "Checking…" : "Resume"}
+              </Button>
+            </div>
+          </form>
+
+          <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            or connect a new position
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
           <form onSubmit={submit} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="kh">KeeperHub API key</Label>

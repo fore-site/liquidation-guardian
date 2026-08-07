@@ -3,11 +3,13 @@
 > An AI agent that keeps your DeFi borrow positions safe from liquidation, executing the fix
 > onchain through [KeeperHub](https://keeperhub.com). Built for the KeeperHub "Last Mile" hackathon.
 
-A KeeperHub workflow watches your Aave health factor around the clock. When a position drifts toward
-the liquidation line, an LLM decides the cheapest fix (repay debt or add collateral) and KeeperHub
-executes it onchain with simulation, gas backoff, retries, and a full audit trail.
+An event-driven watcher tracks your Aave health factor around the clock, reacting to the pool
+events that actually move it — supply, repay, borrow, withdraw, liquidation, and oracle price
+updates. When a position drifts toward the liquidation line, an LLM decides the cheapest fix
+(repay debt or add collateral) and KeeperHub executes it onchain with simulation, gas backoff,
+retries, and a full audit trail.
 
-**Workflow watches. LLM decides. KeeperHub executes.**
+**Event watcher watches. LLM decides. KeeperHub executes.**
 
 Three things make it different: **dynamic risk awareness** (the LLM weighs the cost
 of each fix, including gas, instead of following rigid rules), **one-click defense
@@ -101,9 +103,8 @@ alerts, and approvals are demoable behind just a tunnel to the web form.
 ## Repository layout
 
 ```
-src/workflows/   KeeperHub workflow definitions (trigger + read + condition)
 src/agent/       LLM decision layer (repay vs. add-collateral, + amount)
-server/          Hosted API + Telegram bot (encrypted key store, watch loop)
+server/          Hosted API + Telegram bot + event-driven watcher (encrypted key store, watch loop)
 web/             Vite + React dashboard / Telegram Mini App
 scripts/         Setup & verification (first-tx dry-run, health checks)
 docs/            Architecture, teardown, and pitch material

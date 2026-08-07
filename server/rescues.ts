@@ -21,13 +21,31 @@
 import { SEPOLIA_POOL, SEPOLIA_RESERVES, type ReserveInfo } from "../src/agent/assets.js";
 import type { GuardianStore } from "./store.js";
 
-const DEFAULT_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
+/**
+ * RPC provider list. The primary endpoint comes first; any extras (Alchemy,
+ * QuickNode, Infura…) are appended via `SEPOLIA_RPC_URLS` (comma-separated). A
+ * provider is demoted to the back of the list for `PROVIDER_COOLDOWN_MS` after a
+ * failure, so traffic shifts to the healthy ones instead of hammering a downed
+ * endpoint. The final (null) entry means "start over from the top" on retries.
+ */
+export const DEFAULT_RPC_URLS: (string | null)[] = [
+  process.env.SEPOLIA_RPC_URL?.trim() || "https://ethereum-sepolia-rpc.publicnode.com",
+  ...(process.env.SEPOLIA_RPC_URLS?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
+  null,
+];
+const PROVIDER_COOLDOWN_MS = 60_000;
+/** Cap on sequential in-flight requests per provider (request pacing). */
+const PROVIDER_MAX_INFLIGHT = 8;
+
 // How far back to look. Sepolia is ~12s/block, so 250k blocks ≈ a month — plenty
 // for a demo wallet.
 const DEFAULT_LOOKBACK = 250_000;
 // Public RPCs cap eth_getLogs at 50k blocks per call (publicnode: "exceed maximum
 // block range: 50000"), so we window the lookback into chunks just under that.
 const MAX_RANGE = 49_000;
+
+/** Global HTTP fetch timeout — a hung provider must not stall the poll loop. */
+const FETCH_TIMEOUT_MS = 10_000;
 
 // keccak256 of the canonical event signatures (stable Aave v3 constants).
 const REPAY_TOPIC = "0xa534c8dbe71f871f9f3530e97a74601fea17b426cae02e1c5aee42c96c784051";
@@ -66,17 +84,16 @@ export async function getRescues(
   }
 
   // Backfill path: first run for this wallet — scan the lookback window once.
-  const rpcUrl = process.env.SEPOLIA_RPC_URL?.trim() || DEFAULT_RPC;
   const lookback = Number(process.env.RESCUE_LOOKBACK_BLOCKS || DEFAULT_LOOKBACK);
 
-  const latest = await rpc(rpcUrl, "eth_blockNumber", []);
+  const latest = await rpc("eth_blockNumber", []);
   const latestBlock = typeof latest === "string" ? parseInt(latest, 16) : 0;
   const fromBlock = Math.max(0, latestBlock - lookback);
   const topicUser = padAddress(user);
 
   const [repays, supplies] = await Promise.all([
-    getLogs(rpcUrl, REPAY_TOPIC, topicUser, fromBlock, latestBlock),
-    getLogs(rpcUrl, SUPPLY_TOPIC, topicUser, fromBlock, latestBlock),
+    getLogs(REPAY_TOPIC, topicUser, fromBlock, latestBlock),
+    getLogs(SUPPLY_TOPIC, topicUser, fromBlock, latestBlock),
   ]);
 
   const events: RescueEvent[] = [];
@@ -110,7 +127,6 @@ export interface RawLog {
  * failed window is skipped rather than breaking the whole history.
  */
 async function getLogs(
-  rpcUrl: string,
   topic0: string,
   topicUser: string,
   fromBlock: number,
@@ -120,7 +136,7 @@ async function getLogs(
   for (let start = fromBlock; start <= toBlock; start += MAX_RANGE + 1) {
     const end = Math.min(start + MAX_RANGE, toBlock);
     try {
-      const res = await rpc(rpcUrl, "eth_getLogs", [
+      const res = await rpc("eth_getLogs", [
         {
           address: SEPOLIA_POOL,
           fromBlock: "0x" + start.toString(16),
@@ -159,13 +175,96 @@ function decodeLog(log: RawLog, type: "repay" | "supply"): RescueEvent | null {
   };
 }
 
-/** Minimal JSON-RPC POST. Throws on RPC-level errors. */
-export async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
-  const res = await fetch(rpcUrl, {
+// ── Provider rotation + pacing ──────────────────────────────────────────────
+interface ProviderState {
+  url: string;
+  /** ms timestamp when a failure makes this provider temporarily unusable. */
+  cooldownUntil: number;
+  /** in-flight requests (for the per-provider concurrency cap). */
+  inflight: number;
+}
+
+const providerStates = new Map<string, ProviderState>(
+  DEFAULT_RPC_URLS.filter((u): u is string => u !== null).map((u) => [
+    u,
+    { url: u, cooldownUntil: 0, inflight: 0 },
+  ]),
+);
+let providerCursor = 0;
+/** Sequential id for JSON-RPC requests — some providers reject duplicate ids. */
+let rpcId = 0;
+
+/** Effective provider list for a call: demoted providers are skipped while cooling down. */
+function healthyProviders(): string[] {
+  const now = Date.now();
+  const list = [...providerStates.values()]
+    .filter((p) => now >= p.cooldownUntil && p.inflight < PROVIDER_MAX_INFLIGHT)
+    .map((p) => p.url);
+  // Round-robin: rotate the cursor so a single busy provider isn't repeatedly first.
+  if (list.length > 0) providerCursor = (providerCursor + 1) % list.length;
+  return list;
+}
+
+/**
+ * JSON-RPC POST with provider failover, per-provider pacing, and retries.
+ *
+ * `urls` is a rotation of endpoints ending with `null` ("wrap around"). On each
+ * attempt the next available provider is tried; a failure (network, HTTP ≥400, or
+ * an RPC-level error) puts that provider in a cooldown, and the next provider is
+ * tried immediately. `null` means "we've been around once — retry the first
+ * provider, then give up". Providers never run concurrently: a call always goes
+ * to a single healthy provider, so pacing is implicit and no provider is
+ * hammered by parallel retries.
+ */
+export async function rpc(
+  method: string,
+  params: unknown[],
+  urls: (string | null)[] = DEFAULT_RPC_URLS,
+  retries = 2,
+): Promise<unknown> {
+  let attempt = 0;
+  while (attempt <= retries) {
+    // Pick the next provider: normal round-robin while healthy, else the first
+    // available healthy one.
+    const healthy = healthyProviders();
+    const base = urls[attempt % urls.length];
+    const next = healthy.find((u) => u === base) ?? healthy[0];
+    if (!next) {
+      // All providers cooling down — wait for the shortest cooldown.
+      const soonest = Math.min(
+        ...[...providerStates.values()].map((p) => p.cooldownUntil),
+        Date.now(),
+      );
+      await new Promise((r) => setTimeout(r, Math.max(0, soonest - Date.now()) + 50));
+      continue;
+    }
+
+    const state = providerStates.get(next)!;
+    state.inflight++;
+    try {
+      return await postRpc(next, method, params);
+    } catch (err) {
+      // Demote this provider until it recovers, then try the next one.
+      state.cooldownUntil = Date.now() + PROVIDER_COOLDOWN_MS;
+      attempt++;
+      if (attempt > retries) throw err;
+      continue;
+    } finally {
+      state.inflight--;
+    }
+  }
+  throw new Error("RPC: all providers failed");
+}
+
+/** Single POST to one provider with a global timeout. Throws on any failure. */
+async function postRpc(url: string, method: string, params: unknown[]): Promise<unknown> {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const body = (await res.json()) as { result?: unknown; error?: { message?: string } };
   if (body.error) throw new Error(body.error.message ?? "RPC error");
   return body.result;

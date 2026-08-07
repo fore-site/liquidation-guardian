@@ -365,6 +365,36 @@ export class GuardianStore {
     return id ?? null;
   }
 
+  /** Bind a record to a verified Telegram user + chat (used by /link + Mini App onboarding). */
+  async bindTelegram(
+    id: string,
+    tg: { userId: number; chatId?: number; username?: string },
+  ): Promise<GuardianRecord | null> {
+    const rec = await this.getById(id);
+    if (!rec) return null;
+    // A record already bound to a DIFFERENT Telegram user must not be re-bound.
+    if (rec.telegramUserId != null && rec.telegramUserId !== tg.userId) return null;
+    if (rec.telegramUserId != null) await this.redis.del(TG_INDEX(rec.telegramUserId));
+    rec.telegramUserId = tg.userId;
+    rec.telegramChatId = tg.chatId ?? tg.userId; // private chat id == user id
+    rec.telegramUsername = tg.username;
+    await this.save(rec);
+    await this.redis.set(TG_INDEX(tg.userId), rec.id);
+    return rec;
+  }
+
+  /** Unbind a record from Telegram (keeps the record; the bot stops alerting this chat). */
+  async unbindTelegram(id: string): Promise<GuardianRecord | null> {
+    const rec = await this.getById(id);
+    if (!rec) return null;
+    if (rec.telegramUserId != null) await this.redis.del(TG_INDEX(rec.telegramUserId));
+    delete rec.telegramUserId;
+    delete rec.telegramChatId;
+    delete rec.telegramUsername;
+    await this.save(rec);
+    return rec;
+  }
+
   // ── HF snapshots (for the dashboard chart) ──────────────────────────────────
 
   /** Append an HF reading to the record's capped time series. */

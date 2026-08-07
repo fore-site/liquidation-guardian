@@ -1,43 +1,57 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   closeSession,
   getRescues,
   getSession,
   getStatus,
+  stopWatching,
   type Rescue,
 } from "../api.js";
-import { Onboarding } from "../components/Onboarding.js";
 import { HealthFactorHero } from "../components/HealthFactorHero.js";
 import { PositionCard } from "../components/PositionCard.js";
 import { RescueOptionsCard } from "../components/RescueOptionsCard.js";
 import { RescueHistory } from "../components/RescueHistory.js";
 import { HfHistoryChart } from "../components/HfHistoryChart.js";
+import { TelegramLink } from "../components/TelegramLink.js";
 import { Button } from "../components/ui/button.js";
 
 const REFRESH_MS = 15_000;
 
-export const Route = createFileRoute("/app")({
+export const Route = createFileRoute("/dashboard")({
   component: App,
 });
 
 /**
  * The monitoring dashboard — the one in-app page (session-gated). Uses TanStack
- * Query for the 15s poll (refetchInterval) and mutations for controls; shows
- * onboarding inline when not connected (Telegram Mini App flow).
+ * Query for the 15s poll (refetchInterval) and mutations for controls.
+ * Unauthenticated visitors are redirected to /onboard (onboarding) rather than
+ * shown the form inline on this URL.
  */
 function App() {
+  const navigate = useNavigate();
   const session = useQuery({ queryKey: ["session"], queryFn: getSession, staleTime: Infinity });
 
   const authed = session.data?.authenticated ?? false;
   const ready = session.status !== "pending";
 
+  useEffect(() => {
+    if (ready && !authed) void navigate({ to: "/onboard" });
+  }, [ready, authed, navigate]);
+
   if (!ready) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>;
-  if (!authed) return <Onboarding onConnected={() => void session.refetch()} />;
-  return <Dashboard onDisconnect={() => void session.refetch()} />;
+  if (!authed) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>;
+  return <Dashboard session={session.data?.config} onDisconnect={() => void session.refetch()} />;
 }
 
-function Dashboard({ onDisconnect }: { onDisconnect: () => void }) {
+function Dashboard({
+  session,
+  onDisconnect,
+}: {
+  session?: { telegramUsername?: string | null };
+  onDisconnect: () => void;
+}) {
   const queryClient = useQueryClient();
 
   const status = useQuery({
@@ -59,6 +73,20 @@ function Dashboard({ onDisconnect }: { onDisconnect: () => void }) {
     },
   });
 
+  const stop = useMutation({
+    mutationFn: stopWatching,
+    onSuccess: () => {
+      void queryClient.clear();
+      onDisconnect();
+    },
+  });
+
+  function confirmStop() {
+    if (window.confirm("Stop watching and delete all stored data? You'll need to onboard again.")) {
+      stop.mutate();
+    }
+  }
+
   const s = status.data;
 
   return (
@@ -71,8 +99,11 @@ function Dashboard({ onDisconnect }: { onDisconnect: () => void }) {
           <Button variant="ghost" size="sm" onClick={() => void status.refetch()} disabled={status.isFetching}>
             {status.isFetching ? "Refreshing…" : "Refresh"}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => disconnect.mutate()}>
-            Disconnect
+          <Button variant="outline" size="sm" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>
+            Log out
+          </Button>
+          <Button variant="destructive" size="sm" onClick={confirmStop} disabled={stop.isPending}>
+            Stop watching
           </Button>
         </div>
       </nav>
@@ -110,6 +141,11 @@ function Dashboard({ onDisconnect }: { onDisconnect: () => void }) {
             </footer>
           </>
         ) : null}
+
+        {/* Always visible — Telegram binding is independent of the position read. */}
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <TelegramLink boundUsername={session?.telegramUsername} onChanged={() => void onDisconnect()} />
+        </div>
       </main>
     </div>
   );

@@ -10,53 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppRouteImport } from './routes/app'
-import { Route as StartRouteImport } from './routes/start'
+import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as OnboardRouteImport } from './routes/onboard'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppRoute = AppRouteImport.update({
-  id: '/app',
-  path: '/app',
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
-const StartRoute = StartRouteImport.update({
-  id: '/start',
-  path: '/start',
+const OnboardRoute = OnboardRouteImport.update({
+  id: '/onboard',
+  path: '/onboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/app': typeof AppRoute
-  '/start': typeof StartRoute
+  '/dashboard': typeof DashboardRoute
+  '/onboard': typeof OnboardRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/app': typeof AppRoute
-  '/start': typeof StartRoute
+  '/dashboard': typeof DashboardRoute
+  '/onboard': typeof OnboardRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/app': typeof AppRoute
-  '/start': typeof StartRoute
+  '/dashboard': typeof DashboardRoute
+  '/onboard': typeof OnboardRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/app' | '/start'
+  fullPaths: '/' | '/dashboard' | '/onboard'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/app' | '/start'
-  id: '__root__' | '/' | '/app' | '/start'
+  to: '/' | '/dashboard' | '/onboard'
+  id: '__root__' | '/' | '/dashboard' | '/onboard'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AppRoute: typeof AppRoute
-  StartRoute: typeof StartRoute
+  DashboardRoute: typeof DashboardRoute
+  OnboardRoute: typeof OnboardRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -68,18 +68,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/app': {
-      id: '/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AppRouteImport
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/start': {
-      id: '/start'
-      path: '/start'
-      fullPath: '/start'
-      preLoaderRoute: typeof StartRouteImport
+    '/onboard': {
+      id: '/onboard'
+      path: '/onboard'
+      fullPath: '/onboard'
+      preLoaderRoute: typeof OnboardRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -87,8 +87,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AppRoute: AppRoute,
-  StartRoute: StartRoute,
+  DashboardRoute: DashboardRoute,
+  OnboardRoute: OnboardRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

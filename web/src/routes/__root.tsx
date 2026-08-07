@@ -11,6 +11,7 @@ import * as React from "react";
 // Side-effect import: Tailwind/Vite emits the stylesheet into the bundle
 // (avoiding the ?url asset-hash desync between the SSR chunk and emitted CSS).
 import "../styles.css";
+import { ErrorPage, NotFoundPage } from "../components/ErrorPages.js";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -31,6 +32,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       },
     ],
   }),
+  // Root-level handlers: every child route inherits the styled 404 (unknown
+  // paths + notFound()) and the styled 500 (any load/render/server-fn error).
+  notFoundComponent: NotFoundPage,
+  errorComponent: ({ error, reset }) => <ErrorPage error={error} onReset={reset} />,
   shellComponent: RootDocument,
   component: RootComponent,
 });

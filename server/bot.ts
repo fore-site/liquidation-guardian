@@ -53,6 +53,8 @@ export class GuardianBot {
   private readonly watchIntervalMs: number;
   private running = false;
   private offset = 0;
+  /** Bot username (e.g. "liq_guardian_bot") — used to build t.me deep links. */
+  username: string | null = null;
 
   constructor(opts: GuardianBotOptions) {
     this.tg = new TelegramClient(opts.botToken);
@@ -66,7 +68,8 @@ export class GuardianBot {
   async start(): Promise<void> {
     this.running = true;
     const me = await this.tg.getMe().catch(() => null);
-    console.log(`Telegram bot online${me?.username ? ` as @${me.username}` : ""}.`);
+    this.username = me?.username ?? null;
+    console.log(`Telegram bot online${this.username ? ` as @${this.username}` : ""}.`);
     if (this.webAppUrl) {
       await this.tg
         .setChatMenuButton(this.webAppUrl)
@@ -129,19 +132,81 @@ export class GuardianBot {
     const cmd = msg.text.trim().split(/\s+/)[0].toLowerCase().replace(/@.*$/, "");
 
     switch (cmd) {
-      case "/start":
+      case "/start": {
+        // Deep-link payload: /start link_<code> — bind this chat to the record
+        // the code authorizes (created by the web "Connect Telegram" flow).
+        const payload = msg.text.trim().split(/\s+/)[1] ?? "";
+        if (payload.startsWith("link_")) {
+          return this.cmdLink(chatId, userId, payload.slice("link_".length), msg.from.username);
+        }
         return this.cmdStart(chatId);
+      }
+      case "/link":
+        return this.cmdLink(chatId, userId, msg.text.trim().split(/\s+/)[1] ?? "", msg.from.username);
       case "/status":
         return this.cmdStatus(chatId, userId);
       case "/auto":
         return this.cmdAuto(chatId, userId);
       case "/stop":
         return this.cmdStop(chatId, userId);
+      case "/logout":
+        return this.cmdLogout(chatId, userId);
       case "/help":
         return this.cmdHelp(chatId);
       default:
         await this.tg.sendMessage(chatId, "Unknown command. Try /help.");
     }
+  }
+
+  /**
+   * Bind this Telegram user to the record a web-issued link code authorizes.
+   * The code is single-use, 5-minute, and maps to a record id — the web side
+   * never reveals the key; this just attaches the chat to the existing record.
+   */
+  private async cmdLink(chatId: number, userId: number, code: string, username?: string): Promise<void> {
+    if (!/^[0-9a-f]{8}$/.test(code)) {
+      await this.tg.sendMessage(chatId, "That doesn't look like a link code. Generate one from the dashboard.");
+      return;
+    }
+    const recordId = await this.store.consumeLinkCode(code);
+    if (!recordId) {
+      await this.tg.sendMessage(chatId, "That code is invalid or expired. Generate a new one from the dashboard.");
+      return;
+    }
+    const record = await this.store.getById(recordId);
+    if (!record) {
+      await this.tg.sendMessage(chatId, "That link no longer has a position attached. Generate a new one.");
+      return;
+    }
+    // A record bound to a DIFFERENT Telegram user must not be hijacked.
+    if (record.telegramUserId != null && record.telegramUserId !== userId) {
+      await this.tg.sendMessage(chatId, "This position is already connected to another Telegram account.");
+      return;
+    }
+    await this.store.bindTelegram(record.id, { userId, chatId, username });
+    await this.tg.sendMessage(
+      chatId,
+      `✅ Connected. I'm now watching ${short(record.wallet)} on Aave (Sepolia).\n` +
+        `I'll alert you if your health factor drops below ${record.hfThreshold} and can ` +
+        `rescue it back to ${record.hfTarget}.\n\n` +
+        `/status — check now · /auto — autonomous rescues · /help`,
+    );
+  }
+
+  /**
+   * Log THIS Telegram chat out (unbind) without deleting the record — the web
+   * dashboard keeps watching. Mirrors the web "Log out". /stop remains the
+   * destructive "delete everything + stop watching".
+   */
+  private async cmdLogout(chatId: number, userId: number): Promise<void> {
+    const record = await this.store.getByTelegramUser(userId);
+    if (!record) return this.replyOnboardFirst(chatId);
+    await this.store.unbindTelegram(record.id);
+    await this.tg.sendMessage(
+      chatId,
+      "👋 Logged out of this chat. The dashboard keeps watching your position — you can " +
+        "reconnect any time from the dashboard or with /start.",
+    );
   }
 
   private async cmdStart(chatId: number): Promise<void> {
@@ -167,7 +232,8 @@ export class GuardianBot {
       "Commands:\n" +
         "/status — current health factor + position\n" +
         "/auto — toggle autonomous rescues (execute + notify, no tap needed)\n" +
-        "/stop — stop watching + unbind this chat\n" +
+        "/logout — disconnect this chat (the dashboard keeps watching)\n" +
+        "/stop — stop watching + delete all stored data\n" +
         "/start — connect a position\n\n" +
         "By default I ask before acting: when you're at risk I send the sized fix with " +
         "one-tap buttons. Nothing broadcasts until you approve.",

@@ -58,9 +58,9 @@ Consumers buy when they see the exact numbers.
 
 - **Executes onchain via KeeperHub** — the real rescue tx link
   (`0x5683f7fb…`), verified via `eth_getLogs`.
-- **Use of KeeperHub surfaces** — workflow builder (deployed monitor), simulate
-  first, audit trail, gas sponsorship.
-- **Reliability & observability** — deterministic monitor + event-driven watcher
-  + simulate-first + retries + audit trail.
+- **Use of KeeperHub surfaces** — protocol plugins, simulate-first, audit
+  trail, gas sponsorship, execution.
+- **Reliability & observability** — event-driven watcher + bot watch-loop
+  backup + simulate-first + retries + audit trail.
 - **Originality** — "the LLM is reserved for the judgment call, never trusted
   with arithmetic"; the cost-aware decision is the differentiator.

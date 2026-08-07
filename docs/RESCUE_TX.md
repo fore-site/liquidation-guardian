@@ -59,7 +59,7 @@ model-produced number for the amount.
 
 | Layer | Owns | In this rescue |
 |---|---|---|
-| KeeperHub workflow (watch) | always-on HF monitoring, threshold trip | detected HF < 1.15 |
+| Event-driven watcher (watch) | always-on HF monitoring, threshold trip | triggered on a pool event, HF < 1.15 |
 | Decision layer ([decide.ts](../src/agent/decide.ts)) | repay-vs-supply *choice* + rationale | chose `repay` (capital-efficient) |
 | Fixed-point sizing (code, no oracle) | the *amount* | 18.0917 LINK |
 | KeeperHub execution | simulate → broadcast → confirm | tx `0x5683f7fb…` |
