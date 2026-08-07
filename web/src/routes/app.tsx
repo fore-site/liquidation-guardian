@@ -12,6 +12,8 @@ import { HealthFactorHero } from "../components/HealthFactorHero.js";
 import { PositionCard } from "../components/PositionCard.js";
 import { RescueOptionsCard } from "../components/RescueOptionsCard.js";
 import { RescueHistory } from "../components/RescueHistory.js";
+import { HfHistoryChart } from "../components/HfHistoryChart.js";
+import { Button } from "../components/ui/button.js";
 
 const REFRESH_MS = 15_000;
 
@@ -27,11 +29,10 @@ export const Route = createFileRoute("/app")({
 function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: getSession, staleTime: Infinity });
 
-  // Session-gate: null = still loading; false = not connected; true = connected.
   const authed = session.data?.authenticated ?? false;
   const ready = session.status !== "pending";
 
-  if (!ready) return <div className="app center">Loading…</div>;
+  if (!ready) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>;
   if (!authed) return <Onboarding onConnected={() => void session.refetch()} />;
   return <Dashboard onDisconnect={() => void session.refetch()} />;
 }
@@ -61,46 +62,55 @@ function Dashboard({ onDisconnect }: { onDisconnect: () => void }) {
   const s = status.data;
 
   return (
-    <div className="app">
-      <header className="header">
-        <a href="/" className="header-home" title="Back to home">
-          Liquidation Guardian
+    <div className="min-h-screen bg-background text-foreground">
+      <nav className="flex items-center justify-between border-b border-border px-6 py-4">
+        <a href="/" className="text-lg font-bold tracking-tight hover:text-primary">
+          Liquidation<span className="text-primary">Guardian</span>
         </a>
-        <div className="header-actions">
-          <button className="refresh" onClick={() => void status.refetch()} disabled={status.isFetching}>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => void status.refetch()} disabled={status.isFetching}>
             {status.isFetching ? "Refreshing…" : "Refresh"}
-          </button>
-          <button className="ghost" onClick={() => disconnect.mutate()}>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => disconnect.mutate()}>
             Disconnect
-          </button>
+          </Button>
         </div>
-      </header>
+      </nav>
 
-      {status.isError && (
-        <div className="banner error">
-          {status.error instanceof Error ? status.error.message : "Failed to load"} — is the API
-          server running?
-        </div>
-      )}
-
-      {status.isLoading ? (
-        <div className="banner">Loading position…</div>
-      ) : s ? (
-        <>
-          <HealthFactorHero status={s} />
-          <div className="grid">
-            <PositionCard status={s} />
-            <RescueOptionsCard status={s} />
+      <main className="mx-auto max-w-5xl px-6 py-6">
+        {status.isError && (
+          <div className="mb-4 rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
+            {status.error instanceof Error ? status.error.message : "Failed to load"} — is the API
+            server running?
           </div>
-          <RescueHistory rescues={rescues.data ?? []} />
-          <footer className="footer">
-            <span>
-              {short(s.wallet)} · chain {s.chainId}
-            </span>
-            <span>updated {new Date(s.updatedAt).toLocaleTimeString()}</span>
-          </footer>
-        </>
-      ) : null}
+        )}
+
+        {status.isLoading ? (
+          <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+            Loading position…
+          </div>
+        ) : s ? (
+          <>
+            <HealthFactorHero status={s} />
+            <div className="grid gap-4 md:grid-cols-2">
+              <PositionCard status={s} />
+              <RescueOptionsCard status={s} />
+            </div>
+            <div className="mt-4">
+              <HfHistoryChart />
+            </div>
+            <div className="mt-4">
+              <RescueHistory rescues={rescues.data ?? []} />
+            </div>
+            <footer className="mt-6 flex justify-between text-xs text-muted-foreground">
+              <span>
+                {short(s.wallet)} · chain {s.chainId}
+              </span>
+              <span>updated {new Date(s.updatedAt).toLocaleTimeString()}</span>
+            </footer>
+          </>
+        ) : null}
+      </main>
     </div>
   );
 }

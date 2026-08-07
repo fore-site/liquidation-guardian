@@ -3,6 +3,8 @@ node_modules/
 web/node_modules/
 web/dist/
 dist/
+web/.output/
+web/.nitro/
 .git/
 .env
 .env.local

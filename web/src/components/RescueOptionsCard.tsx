@@ -1,4 +1,6 @@
 import type { Candidate, Status } from "../api.js";
+import { Badge } from "./ui/badge.js";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js";
 
 /**
  * The sized rescue levers the Guardian would choose between. Each candidate is a
@@ -9,39 +11,52 @@ export function RescueOptionsCard({ status }: { status: Status }) {
   const { candidates } = status;
 
   return (
-    <section className="card">
-      <h2>Rescue options</h2>
-      {candidates.length === 0 ? (
-        <p className="muted">
-          {status.healthFactor === null
-            ? "No debt — nothing to rescue."
-            : "Position is above the restore target. No action needed."}
-        </p>
-      ) : (
-        <ul className="options">
-          {candidates.map((c, i) => (
-            <Option key={`${c.action}-${c.asset}-${i}`} c={c} />
-          ))}
-        </ul>
-      )}
-    </section>
+    <Card className="bg-card">
+      <CardHeader>
+        <CardTitle>Rescue options</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {candidates.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {status.healthFactor === null
+              ? "No debt — nothing to rescue."
+              : "Position is above the restore target. No action needed."}
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {candidates.map((c, i) => (
+              <Option key={`${c.action}-${c.asset}-${i}`} c={c} />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 function Option({ c }: { c: Candidate }) {
   const verb = c.action === "repay" ? "Repay" : "Supply";
   const state = !c.available ? "unavailable" : c.reachesTarget ? "full" : "partial";
+  const badgeVariant = !c.available
+    ? "outline"
+    : c.reachesTarget
+      ? "success"
+      : "warning";
   const badge = { full: "Reaches target", partial: "Partial", unavailable: "Unavailable" }[state];
 
   return (
-    <li className={`option ${state}`}>
-      <div className="option-head">
-        <span className="option-action">
+    <li
+      className={`rounded-xl border border-border bg-secondary/40 p-3 ${
+        !c.available ? "opacity-60" : ""
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold">
           {verb} {fmt(c.amountHuman)} {c.asset}
         </span>
-        <span className={`badge ${state}`}>{badge}</span>
+        <Badge variant={badgeVariant as "success" | "warning" | "outline"}>{badge}</Badge>
       </div>
-      {c.note && <p className="option-note">{c.note}</p>}
+      {c.note && <p className="mt-1 text-xs text-muted-foreground">{c.note}</p>}
     </li>
   );
 }

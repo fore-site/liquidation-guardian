@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react";
 import { openSession, type Credentials, type SessionConfig } from "../api.js";
 import { initTelegram, isInTelegram, telegramInitData } from "../telegram.js";
+import { Button } from "./ui/button.js";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card.js";
+import { Input } from "./ui/input.js";
+import { Label } from "./ui/label.js";
+import { Slider } from "./ui/slider.js";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.js";
 
 /**
  * First-run screen. Collects the user's own KeeperHub key + wallet + risk levels,
  * then hands the key to the server ONCE (it's held server-side, never stored in the
- * browser). No terminal, no .env, no code — this replaces the whole CLI setup.
+ * browser). No terminal, no .env, no code.
  *
  * When opened inside Telegram (the bot's Mini App), it also forwards the signed
- * `initData` so the server can bind the credential to the verified Telegram user and
- * push alerts to that chat — the key still goes straight over HTTPS, never through chat.
+ * `initData` so the server can bind the credential to the verified Telegram user.
  */
 export function Onboarding({ onConnected }: { onConnected?: (config: SessionConfig) => void }) {
   const [apiKey, setApiKey] = useState("");
@@ -21,13 +26,10 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
   const [error, setError] = useState<string | null>(null);
   const inTelegram = isInTelegram();
 
-  // Tell Telegram we're ready + expand to full height (no-op in a normal browser).
   useEffect(() => {
     initTelegram();
   }, []);
 
-  // Defense profiles preset the threshold/target sliders (frontend-only presets —
-  // the backend just receives the numbers).
   function pickProfile(p: "conservative" | "efficient") {
     setProfile(p);
     if (p === "conservative") {
@@ -55,8 +57,6 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
       };
       const { config } = await openSession(creds);
       if (config) {
-        // Standalone page (/start): jump to the dashboard route. Inline
-        // (the Mini App flow in /app): switch to the dashboard.
         if (onConnected) onConnected(config);
         else window.location.href = "/app";
       }
@@ -68,112 +68,108 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
   }
 
   return (
-    <div className="onboarding">
-      <div className="onboarding-card">
-        <a className="onboarding-back" href="/">
-          ← Back to home
-        </a>
-        <h1>Liquidation Guardian</h1>
-
-        <form onSubmit={submit}>
-          <label>
-            <span>KeeperHub API key</span>
-            <input
-              type="password"
-              placeholder="kh_…"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              autoComplete="off"
-              required
-            />
-            <small>Held on the server, never stored in your browser.</small>
-          </label>
-
-          <label>
-            <span>Wallet address</span>
-            <input
-              type="text"
-              placeholder="0x…"
-              value={wallet}
-              onChange={(e) => setWallet(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-              required
-            />
-            <small>Wallet holding the Aave position to protect (Sepolia).</small>
-          </label>
-
-          <div className="profiles">
-            <span className="profiles-label">Defense profile</span>
-            <div className="profile-options">
-              <button
-                type="button"
-                className={`profile ${profile === "conservative" ? "selected" : ""}`}
-                onClick={() => pickProfile("conservative")}
-              >
-                <strong>The Conservative</strong>
-                <small>Act early — prioritize absolute safety.</small>
-              </button>
-              <button
-                type="button"
-                className={`profile ${profile === "efficient" ? "selected" : ""}`}
-                onClick={() => pickProfile("efficient")}
-              >
-                <strong>The Capital Efficient</strong>
-                <small>Ride the edge — maximize yield.</small>
-              </button>
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
+      <Card className="w-full max-w-md bg-card">
+        <CardHeader>
+          <a href="/" className="mb-1 text-sm text-muted-foreground hover:text-foreground">
+            ← Back to home
+          </a>
+          <CardTitle className="text-2xl">Connect your position</CardTitle>
+          <CardDescription>
+            Your KeeperHub key goes straight to the server over HTTPS — never stored in the browser.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="kh">KeeperHub API key</Label>
+              <Input
+                id="kh"
+                type="password"
+                placeholder="kh_…"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                autoComplete="off"
+                required
+              />
             </div>
-            <small>Presets the thresholds below; fine-tune anytime.</small>
-          </div>
 
-          <div className="sliders">
-            <label>
-              <span>
-                Act below <strong>{threshold.toFixed(2)}</strong>
-              </span>
-              <input
-                type="range"
-                min={1.05}
-                max={2.5}
-                step={0.05}
-                value={threshold}
-                onChange={(e) => {
-                  const t = Number(e.target.value);
-                  setThreshold(t);
-                  if (target < t + 0.1) setTarget(Math.round((t + 0.5) * 100) / 100);
-                }}
+            <div className="space-y-2">
+              <Label htmlFor="wallet">Wallet address</Label>
+              <Input
+                id="wallet"
+                type="text"
+                placeholder="0x…"
+                value={wallet}
+                onChange={(e) => setWallet(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                required
               />
-              <small>Below this, the Guardian steps in.</small>
-            </label>
+            </div>
 
-            <label>
-              <span>
-                Restore to <strong>{Math.max(target, targetFloor).toFixed(2)}</strong>
-              </span>
-              <input
-                type="range"
-                min={targetFloor}
-                max={3}
-                step={0.05}
-                value={Math.max(target, targetFloor)}
-                onChange={(e) => setTarget(Number(e.target.value))}
-              />
-              <small>Rescues the position back up to this.</small>
-            </label>
-          </div>
+            <div className="space-y-3">
+              <Label>Defense profile</Label>
+              <Tabs
+                value={profile ?? undefined}
+                onValueChange={(v) => pickProfile(v as "conservative" | "efficient")}
+                className="w-full"
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="conservative">The Conservative</TabsTrigger>
+                  <TabsTrigger value="efficient">Capital Efficient</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
 
-          {error && <div className="banner error">{error}</div>}
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>
+                  Act below <span className="font-bold text-primary">{threshold.toFixed(2)}</span>
+                </Label>
+                <Slider
+                  min={1.05}
+                  max={2.5}
+                  step={0.05}
+                  value={[threshold]}
+                  onValueChange={([t]) => {
+                    setThreshold(t);
+                    if (target < t + 0.1) setTarget(Math.round((t + 0.5) * 100) / 100);
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>
+                  Restore to{" "}
+                  <span className="font-bold text-primary">{Math.max(target, targetFloor).toFixed(2)}</span>
+                </Label>
+                <Slider
+                  min={targetFloor}
+                  max={3}
+                  step={0.05}
+                  value={[Math.max(target, targetFloor)]}
+                  onValueChange={([t]) => setTarget(t)}
+                />
+              </div>
+            </div>
 
-          <button className="primary" type="submit" disabled={busy}>
-            {busy ? "Connecting…" : "Connect & watch"}
-          </button>
-        </form>
+            {error && (
+              <div className="rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
+                {error}
+              </div>
+            )}
 
-        <p className="footnote">
-          Read-only dashboard. Rescues are executed by KeeperHub under the delegation you signed —
-          this page never asks you to connect or sign a wallet.
-        </p>
-      </div>
+            <Button type="submit" disabled={busy} className="w-full" size="lg">
+              {busy ? "Connecting…" : "Connect & watch"}
+            </Button>
+
+            <p className="text-center text-xs text-muted-foreground">
+              Rescues are executed by KeeperHub under the delegation you signed — this page never
+              asks you to connect or sign a wallet.
+            </p>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

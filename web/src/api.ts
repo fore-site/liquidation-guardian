@@ -77,6 +77,7 @@ export interface Credentials {
 // server fns Start compiles into client-safe proxies.
 import {
   closeSessionFn,
+  getHfHistoryFn,
   getRescuesFn,
   getSessionFn,
   getStatusFn,
@@ -109,3 +110,10 @@ export const closeSession = () => closeSessionFn().then((r) => unwrap<SessionSta
 export const getStatus = () => getStatusFn().then((r) => unwrap<Status>(r));
 
 export const getRescues = () => getRescuesFn().then((r) => unwrap<Rescue[]>(r));
+
+/** Recent HF readings for the dashboard chart, oldest-first. */
+export interface HfPoint {
+  t: number;
+  hf: number | null;
+}
+export const getHfHistory = () => getHfHistoryFn().then((r) => unwrap<HfPoint[]>(r));

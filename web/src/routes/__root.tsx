@@ -8,7 +8,9 @@ import {
 } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 import * as React from "react";
-import appCss from "../styles.css?url";
+// Side-effect import: Tailwind/Vite emits the stylesheet into the bundle
+// (avoiding the ?url asset-hash desync between the SSR chunk and emitted CSS).
+import "../styles.css";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -28,7 +30,6 @@ export const Route = createRootRouteWithContext<RouterContext>()({
           "An AI agent that keeps your Aave borrow position safe from liquidation — deciding the cheapest fix, then executing it onchain through KeeperHub.",
       },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
   }),
   shellComponent: RootDocument,
   component: RootComponent,
