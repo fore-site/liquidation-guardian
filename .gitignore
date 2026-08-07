@@ -28,11 +28,7 @@ web/.output/
 
 # Agent tooling state (session memory, settings, reference screenshots)
 .commandcode/
-.claude/*
-# …except durable run-skills, which are project assets (launch/driver code).
-!.claude/skills/
-.claude/skills/*
-!.claude/skills/run-liquidation-guardian/
+.claude/
 screenshots/
 
 # Playwright smoke-test artifacts
