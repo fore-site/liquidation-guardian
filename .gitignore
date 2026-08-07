@@ -3,6 +3,9 @@
 .env.local
 *.key
 
+# Agent instructions — local working notes, not project source
+AGENTS.md
+
 # KeeperHub wallet (server-side custody, but the local file authenticates signing)
 .keeperhub/
 wallet.json
