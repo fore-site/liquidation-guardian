@@ -83,11 +83,18 @@ import {
   openSessionFn,
 } from "./server/api.js";
 
-/** Response-shape guard: a server fn returns data or a Response (error). */
+/**
+ * Response-shape guard: a server fn returns plain data, or a Response. Session
+ * POST/DELETE return a Response even on SUCCESS (to carry the Set-Cookie
+ * header), so only treat >=400 Responses as errors.
+ */
 async function unwrap<T>(r: unknown): Promise<T> {
   if (r instanceof Response) {
-    const body = (await r.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `Request failed (${r.status})`);
+    if (r.status >= 400) {
+      const body = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `Request failed (${r.status})`);
+    }
+    return (await r.json()) as T;
   }
   return r as T;
 }
