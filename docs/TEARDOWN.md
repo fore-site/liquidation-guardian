@@ -38,7 +38,7 @@ Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
   env var / flag for API-key auth up front.
 
 ### [F3] Etherscan shows a transaction that looks nothing like what you sent — THE big one
-- **Hit:** I asked KeeperHub to send 0.001 ETH from my wallet (`0x88678…`) to itself. The API
+- **Hit:** I asked KeeperHub to send 0.001 ETH from my wallet to itself. The API
   returned success + a real tx hash. But on Etherscan the transaction reads:
   `from 0xa17c… (a stranger)  →  to 0x5af5… (a contract)`, `value: 0 ETH`, `gas used: 74793`.
   None of the three top-level values (from, to, value) match what I sent.
@@ -48,7 +48,7 @@ Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
   - KeeperHub uses a **relayer + router** model. A KeeperHub keeper EOA (`0xa17c…`) submits the
     tx and **pays the gas**, calling a KeeperHub **router contract** (`0x5af5…`).
   - Your intent is encoded in the **calldata**: selector `0x9aefaff8`, then
-    `(owner=0x88678…, recipient=0x88678…, amount=0x038d7ea4c68000 = 0.001 ETH, + a 65-byte
+    `(owner=<your wallet>, recipient=<your wallet>, amount=0x038d7ea4c68000 = 0.001 ETH, + a 65-byte
     signature)`. The self-transfer is real; it's just an *internal* transfer done by the router,
     which is why the top-level `value` is 0 and gas is 74793 (contract call) not 21000 (bare send).
   - Your KeeperHub wallet is **not a plain EOA** — it has 23 bytes of code:

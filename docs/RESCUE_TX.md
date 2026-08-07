@@ -10,7 +10,7 @@ the repay through KeeperHub.
 
 - **Network:** Ethereum Sepolia (chainId 11155111)
 - **Protocol:** Aave v3 — Pool `0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951`
-- **Position owner:** `0x88678C9ae3798Aa77c753C3a6a028FE9FA5f7E3E` (EIP-7702 smart account)
+- **Position owner:** the demo wallet (EIP-7702 smart account)
 - **Trigger:** health factor **1.1029**, below the Guardian's action threshold (1.15)
 - **Decision:** `repay 18.0917 LINK` of debt to restore HF toward the 1.5 target
 - **Result:** health factor **1.1029 → 1.5027**
