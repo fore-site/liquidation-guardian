@@ -1,6 +1,6 @@
-# First Transaction — Submission Proof
+# First Transaction — Onchain Proof
 
-**This is the linkable transaction required by the hackathon submission.**
+**This is the linkable transaction proving the full path works end-to-end.**
 
 - **Network:** Sepolia testnet (chainId 11155111)
 - **Executed via:** KeeperHub REST API (`POST /api/execute/transfer`)

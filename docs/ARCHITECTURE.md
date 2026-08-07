@@ -1,7 +1,7 @@
 # Liquidation Guardian — Architecture
 
 > An AI agent that keeps your DeFi borrow positions safe from liquidation, executing
-> the fix onchain through KeeperHub. Built for the KeeperHub "Last Mile" hackathon.
+> the fix onchain through KeeperHub.
 
 ## The problem (for readers new to DeFi)
 
@@ -13,7 +13,7 @@ money this way, often while asleep.
 
 The fix is mechanical but must happen *fast and reliably*: either **repay some debt** or **add
 collateral** to push the health factor back up. That "must happen reliably, onchain, right now"
-is exactly KeeperHub's last-mile problem — which is why this project fits the brief's thesis.
+is exactly KeeperHub's last-mile problem — which is why this project is built the way it is.
 
 ## Design principle: event watcher watches, LLM decides
 
@@ -45,7 +45,7 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
                          └────────┬─────────────────────────────────────┘
                                   ▼
                          ┌─────────────────────────────────────────────┐
-   the "last mile" —     │  KeeperHub Execution                         │
+   the execution layer — │  KeeperHub Execution                         │
    KeeperHub owns this   │                                              │
                          │  1. simulate:true  → gas estimate + revert   │
                          │     check, no broadcast                      │
@@ -57,9 +57,9 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
                          └─────────────────────────────────────────────┘
 ```
 
-**How this split maps onto the judging criteria:**
+**How this split maps onto the design goals:**
 
-| Criterion | How this design hits it |
+| Goal | How this design hits it |
 |---|---|
 | Executes onchain via KeeperHub | `execute_protocol_action` (aave-v3) is a real tx; every rebalance is linkable |
 | Use of KeeperHub surfaces | Protocol plugins, simulate, audit trail, notifications, execution |
@@ -98,7 +98,7 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
 ## Telegram bot + Mini App (the phone-native face)
 
 Real DeFi users live on their phones, and a liquidation guardian's value is in *pushing* the instant
-health factor drops. The bot (`server/bot.ts`) closes that last mile:
+health factor drops. The bot (`server/bot.ts`) closes that gap:
 
 ```
 Telegram ──Mini App (web form + initData)──▶ POST /api/session ──▶ verify initData
@@ -229,6 +229,6 @@ is independently verifiable via RPC `eth_getLogs` on the Aave Pool's `Repay` eve
 
 - **Is `aave-v3` on Sepolia?** Yes — confirmed live (this build's real rescue ran there).
 - **Gas sponsorship on testnets?** Yes — Sepolia transfers were fully gas-sponsored (balance
-  untouched to the wei), despite the brief saying "mainnet only" (TEARDOWN F4).
+  untouched to the wei), despite the docs saying "mainnet only" (TEARDOWN F4).
 - **Are Stripe / x402scan surfaces live?** Not in the current docs; nothing in this build depends on
   them (TEARDOWN F1).

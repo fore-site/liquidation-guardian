@@ -1,10 +1,10 @@
 /**
  * Typed KeeperHub REST client.
  *
- * Every endpoint here was verified against the live API (Sepolia) during the
- * hackathon build — see docs/TEARDOWN.md and docs/FIRST_TX.md. Field names match
- * the real API (chainId / recipientAddress, Idempotency-Key as a header, strict
- * boolean `simulate`).
+ * Every endpoint here was verified against the live API (Sepolia) — see
+ * docs/TEARDOWN.md and docs/FIRST_TX.md. Field names match the real API
+ * (chainId / recipientAddress, Idempotency-Key as a header, strict boolean
+ * `simulate`).
  */
 import { randomUUID } from "node:crypto";
 import { createLogger } from "./log.js";

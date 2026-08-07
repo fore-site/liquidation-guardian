@@ -1,9 +1,8 @@
-# Demo Script — Liquidation Guardian
+# Demo Walkthrough — Liquidation Guardian
 
 The money shot: **a hosted LLM (OpenAI-compatible provider) decides the fix, KeeperHub executes it onchain.**
-This is the script for the DoraHacks demo video and the live finalist pitch.
 
-## Setup checklist (before recording)
+## Setup checklist (before you start)
 
 ```bash
 # 1. Env — make sure a stale shell BASE_URL / ANTHROPIC_API_KEY can't shadow .env
@@ -18,19 +17,19 @@ npm install
 npm run typecheck
 npm run test-sizing
 
-# 3. (Optional, for the dashboard/bot cut) Redis + the hosted face
+# 3. (Optional, for the dashboard/bot) Redis + the hosted face
 redis-server &            # or point REDIS_URL at a hosted Redis
 npm run dev:api           # terminal 1 — API + bot on :8787
 npm run dev:web           # terminal 2 — dashboard on :5173 (proxies /api)
 ```
 
-> **HF gotcha:** the position starts healthy (HF ~2.99). The demo *opens a fresh at-risk position*,
-> so `setup-position` is always the first onchain step — don't record the "at risk" read against a
-> healthy wallet.
+> **HF gotcha:** the position starts healthy (HF ~2.99). The walkthrough *opens a fresh at-risk
+> position*, so `setup-position` is always the first onchain step — don't run the "at risk" read
+> against a healthy wallet.
 
-## The demo loop (≤3 minutes)
+## The loop (≤3 minutes)
 
-| # | Shot | What's on screen | Narrator says (or on-screen text) |
+| # | Step | What's on screen | What's happening |
 |---|---|---|---|
 | 1 | Repo + README (10s) | `git log --oneline`, README top | "Event watcher watches, LLM decides, KeeperHub executes. Our event-driven watcher tracks the Aave pool's events; when the health factor nears liquidation, an LLM picks the cheapest fix and KeeperHub executes it onchain — simulated first, never blind." |
 | 2 | Open an at-risk position (30s) | `npm run setup-position` | "Sepolia only lets us demo a single-asset LINK position, which is actually the cleanest case: the rescue amount is exact token math, no oracle." Ends with **HF just above 1.0**. |
@@ -40,28 +39,12 @@ npm run dev:web           # terminal 2 — dashboard on :5173 (proxies /api)
 | 6 | The observer faces (10s) | Dashboard `/api/status`, Telegram `/status` + buttons | "The same engine behind a dashboard and a Telegram bot — the key never leaves the server, approvals are one tap." |
 | 7 | Closing (10s) | Repo + tx link | "Reliability is the product: simulate-first, deterministic monitor, gas-sponsored execution through KeeperHub." |
 
-## DoraHacks submission checklist
+## Why it works
 
-All three items are **mandatory** — a submission missing any one can't be judged:
-
-- [ ] **GitHub repo link.** ⚠️ No git remote exists yet — create the repo and push `main` first:
-      `git remote add origin <url> && git push -u origin main`. Keep `.commandcode/` untracked.
-- [ ] **Demo video link** (hosted — YouTube/Loom; ~3 min, follow the script above).
-- [ ] **Real KeeperHub-executed tx link** — from step 4. Etherscan link for the rescue, e.g.
-      `https://sepolia.etherscan.io/tx/<hash>`.
-- [ ] Project name + tagline: **Liquidation Guardian** — "event watcher watches, LLM decides, KeeperHub
-      executes."
-- [ ] Description: paragraph + the architecture docs link. Shortlist is judged from this + the pitch.
-
-## Live pitch notes (finalists pitch Aug 17–19)
-
-Map straight onto the judging criteria (full table in `docs/ARCHITECTURE.md`):
-
-- **Executes onchain via KeeperHub** — the rescue tx link, end of story.
+- **Executes onchain via KeeperHub** — the rescue tx, end of story.
 - **Reliability & observability** — deterministic monitor + simulate-first + retries + audit trail is
   the entire product: "a retry that lands the tx saves real money."
-- **Use of KeeperHub surfaces** — workflow builder, conditions, protocol plugins, simulate, audit
-  trail, gas sponsorship.
+- **Use of KeeperHub surfaces** — protocol plugins, simulate, audit trail, gas sponsorship.
 - **Originality** — "don't get liquidated while you sleep"; the LLM is reserved for the judgment
   call, never trusted with arithmetic.
 
@@ -71,8 +54,8 @@ Map straight onto the judging criteria (full table in `docs/ARCHITECTURE.md`):
   `.env` in earlier provider setups — the LLM clients no longer read them, but unset them anyway to
   avoid confusion. The provider is configured via `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL`.
 - **A slow or rate-limited LLM provider** falls back to deterministic sizing (`decideRescueWithLlm`)
-  — the position stays protected. The dry-run decision shot can be re-recorded freely.
+  — the position stays protected. The dry-run decision step can be re-run freely.
 - **Every write simulates first** — a `--dry-run` guardian simulates too, so it's free to iterate on
-  the decision shot as many times as needed.
+  the decision step as many times as needed.
 - **`setup-position` mints 300 LINK** via the faucet each run (collateral + a rescue-repay buffer) —
   fine on testnet, just know the wallet balance grows.

@@ -1,7 +1,6 @@
-# Pitch Deck — Liquidation Guardian
+# Product Pitch — Liquidation Guardian
 
-Three-pillar structure for the demo video and the live finalist pitch, mapped to
-the KeeperHub "Last Mile" judging criteria. Keep it to ~3 minutes.
+Three-pillar structure for the product narrative and demo. Keep it to ~3 minutes.
 
 ## Opening (15s) — the pain
 
@@ -54,7 +53,7 @@ your health factor, and see the math of the pain you're avoiding:
 
 Consumers buy when they see the exact numbers.
 
-## Closing (20s) — map to judging criteria
+## Closing (20s) — why it matters
 
 - **Executes onchain via KeeperHub** — the real rescue tx link
   (`0x5683f7fb…`), verified via `eth_getLogs`.

@@ -1,7 +1,7 @@
 # Liquidation Guardian
 
 > An AI agent that keeps your DeFi borrow positions safe from liquidation, executing the fix
-> onchain through [KeeperHub](https://keeperhub.com). Built for the KeeperHub "Last Mile" hackathon.
+> onchain through [KeeperHub](https://keeperhub.com).
 
 An event-driven watcher tracks your Aave health factor around the clock, reacting to the pool
 events that actually move it — supply, repay, borrow, withdraw, liquidation, and oracle price
@@ -20,7 +20,7 @@ to an external wallet). A landing page with an avoided-loss ROI calculator is in
 
 ## Status
 
-Under active development for the hackathon (deadline 2026-08-13). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Actively maintained. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
 
@@ -80,7 +80,7 @@ Guardian through KeeperHub; the UI just watches. See [docs/ARCHITECTURE.md](docs
 
 ## Telegram bot + Mini App (phone-native watch + approve)
 
-The same server also runs a Telegram bot when `TELEGRAM_BOT_TOKEN` is set — the "last mile" on a
+The same server also runs a Telegram bot when `TELEGRAM_BOT_TOKEN` is set — alerts on your
 phone. It **pushes** an alert the instant your health factor drops and lets you approve the fix with
 one tap (`[✅ Repay] [🛡 Supply] [✋ Ignore]`); `/auto` switches to autonomous rescue-and-notify.
 
@@ -110,9 +110,8 @@ scripts/         Setup & verification (first-tx dry-run, health checks)
 docs/            Architecture, teardown, and pitch material
 ```
 
-## Why this fits the brief
+## Why reliability is the point
 
-The hackathon rewards agents that execute onchain reliably, not clever demos that never touch a
-chain. Liquidation protection is a use case where reliability is the entire point: a retry that
+Liquidation protection is a use case where reliability is the entire product: a retry that
 lands a transaction saves the user real money. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for how the design maps onto the judging criteria.
+for how the design is built around that.

@@ -35,7 +35,5 @@ screenshots/
 # Playwright smoke-test artifacts
 .playwright-mcp/
 
-hackathon_brief.txt
-
 
 

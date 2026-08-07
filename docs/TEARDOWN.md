@@ -1,6 +1,5 @@
 # Zero → First Transaction: A Fresh Builder's Teardown
 
-> **Bounty submission — Best Onboarding UX Improvement.**
 > This is a real-time log of getting from *never used KeeperHub* to *first transaction executed*,
 > written by a builder with strong general coding skills but **zero web3/DeFi background**. Every
 > point of friction is recorded as it happened, with a proposed fix. The goal: make the next
@@ -19,13 +18,13 @@ If something tripped *me* up, it will trip up the wave of AI-agent builders comi
 
 Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
 
-### [F1] The brief promises surfaces the docs don't mention
-- **Hit:** The hackathon brief names Stripe integration, x402scan.com indexing, and mainnet gas
+### [F1] The docs promise surfaces they don't mention
+- **Hit:** The marketing copy names Stripe integration, x402scan.com indexing, and mainnet gas
   sponsorship. None of these appear in the current docs (agentic-wallet, mcp-server, main).
 - **Confusing because:** As a newcomer I can't tell if I'm missing a page or the feature isn't live.
   I don't know which source of truth wins.
-- **Proposed fix:** Reconcile brief ↔ docs, or add a "Hackathon: what's live vs. roadmap" note so
-  builders don't design around features that aren't shipped.
+- **Proposed fix:** Reconcile the marketing copy with the docs, or add a "what's live vs. roadmap"
+  note so builders don't design around features that aren't shipped.
 
 ### [F2] The CLI quickstart doc page is broken
 - **Hit:** `https://docs.keeperhub.com/cli/quickstart` returned an empty/malformed 200, and
@@ -63,8 +62,8 @@ Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
   Also: the API response could include an `internalTransfers` or `effectiveFrom/effectiveTo`
   field so builders don't have to decode calldata to confirm what moved.
 
-### [F4] Brief said gas sponsorship is "mainnet Ethereum" — but Sepolia was sponsored too
-- **Hit:** The hackathon brief states gas sponsorship is offered "on mainnet Ethereum." In
+### [F4] Docs said gas sponsorship is "mainnet Ethereum" — but Sepolia was sponsored too
+- **Hit:** The docs state gas sponsorship is offered "on mainnet Ethereum." In
   practice my Sepolia transfer was fully gas-sponsored (balance untouched).
 - **Proposed fix:** Clarify where sponsorship applies. If testnets are sponsored too, say so —
   it's a big selling point for builders worried about faucet funds.
@@ -183,13 +182,13 @@ Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
 
 <!-- Balance the teardown: note the things that were genuinely easy, so they don't get "fixed" away. -->
 
-- The docs having a dedicated **Hackathon Quickstart** section signals the intended happy path clearly.
+- The docs having a dedicated **Quickstart** section signals the intended happy path clearly.
 - **No private-key handling** (Turnkey auto-provision) removes the single scariest step for a newcomer.
 - `simulate: true` preflight is a solid safety rail — it let me reason about a write before risking one.
 
 ---
 
-## Proposed deliverable for the bounty
+## Proposed deliverable
 
 1. This teardown (friction + fixes).
 2. A **starter template** (`create-guardian` style scaffold) that encodes the happy path we found:
