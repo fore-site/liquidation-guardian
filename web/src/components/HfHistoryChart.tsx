@@ -40,7 +40,13 @@ export function HfHistoryChart() {
                 </defs>
                 <CartesianGrid stroke="#26262c" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="t" stroke="#8a8a93" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#8a8a93" fontSize={11} tickLine={false} axisLine={false} domain={["dataMin - 0.1", "dataMax + 0.1"]} />
+                <YAxis
+                  stroke="#8a8a93"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  domain={[(dataMin: number) => Math.floor((dataMin - 0.1) * 100) / 100, (dataMax: number) => Math.ceil((dataMax + 0.1) * 100) / 100]}
+                />
                 <Tooltip
                   contentStyle={{
                     background: "#1c1c21",
