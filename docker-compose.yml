@@ -21,8 +21,10 @@ services:
     environment:
       # Override REDIS_URL from .env so the app finds Redis on the compose network.
       REDIS_URL: redis://redis:6379
+      # The TanStack Start / nitro server listens on 3000.
+      DASHBOARD_PORT: 3000
     ports:
-      - "8787:8787"
+      - "8787:3000"
 
 volumes:
   redis-data:

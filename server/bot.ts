@@ -1,7 +1,7 @@
 /**
  * The Liquidation Guardian Telegram bot: the phone-native "watch + approve" face.
  *
- * Runs in the same process as the HTTP API (see server/serve.ts), sharing the
+ * Runs in the same process as the web/API server (the TanStack Start app), sharing the
  * encrypted {@link GuardianStore}. Two concurrent loops:
  *   - **long-poll loop** — pulls updates (commands, button taps) and handles them.
  *   - **watch loop** — every `watchIntervalMs`, re-reads every stored position; when

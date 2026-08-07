@@ -1,10 +1,10 @@
 /**
  * Encrypted, Redis-backed credential + watch store.
  *
- * This is the shared state between the two faces of the server: the HTTP onboarding
- * (web form / Telegram Mini App) *writes* a record here, and the bot's watch loop
+ * This is the shared state between the two faces of the server: the web onboarding
+ * (TanStack Start app / Telegram Mini App) *writes* a record here, and the bot's watch loop
  * *reads* every record to check health factors and push alerts. Because both run in
- * one process (see server/serve.ts), they share this module directly.
+ * one process (the TanStack Start server), they share this module directly.
  *
  * ## The security invariant
  *

@@ -1,10 +1,8 @@
-# Liquidation Guardian — one image serving the API, the Mini App / dashboard UI,
-# and the Telegram bot (long-poll + watch loop) in a single Node process.
-#
-# The server runs via tsx (no separate JS emit), so the runtime image carries the
-# TypeScript source plus node_modules (tsx included) and the prebuilt web/dist.
+# Liquidation Guardian — one image serving the API (TanStack Start server
+# functions), the Mini App / dashboard UI, and the Telegram bot (long-poll +
+# watch loop) in a single Node process.
 
-# ── Stage 1: install deps + typecheck + build the web UI ──────────────────────
+# ── Stage 1: install deps + typecheck + build the TanStack Start app ──────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -17,9 +15,9 @@ COPY src ./src
 COPY server ./server
 COPY web ./web
 
-# Typecheck the server/agent code, then build the front-end into web/dist.
+# Typecheck the server/agent code, then build the Start app (SSR + nitro server).
 RUN npm run typecheck
-RUN npm ci --prefix web && npm run build --prefix web
+RUN npm ci --include=dev --prefix web && npm run build --prefix web
 
 # ── Stage 2: slim runtime ─────────────────────────────────────────────────────
 FROM node:20-alpine AS runtime
@@ -32,8 +30,10 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/server ./server
-COPY --from=builder /app/web/dist ./web/dist
+COPY --from=builder /app/web/package.json ./web/package.json
+COPY --from=builder /app/web/node_modules ./web/node_modules
+COPY --from=builder /app/web/.output ./web/.output
 
-EXPOSE 8787
-# serve.ts reads web/dist relative to the working directory (/app/web/dist).
-CMD ["node", "--import", "tsx", "server/serve.ts"]
+EXPOSE 3000
+# The nitro server serves the API + SSR UI + bot in one process.
+CMD ["node", "web/.output/server/index.mjs"]

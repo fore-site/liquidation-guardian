@@ -1,8 +1,10 @@
 /**
- * Typed client for the local dashboard API (server/serve.ts). The browser only
- * ever talks to /api/* — the KeeperHub key stays server-side.
+ * Typed client for the Guardian API — calls the TanStack Start server
+ * functions directly (they run server-side; the KeeperHub key never leaves the
+ * server). The HttpOnly session cookie rides along on the fetch automatically.
  */
 
+// Types stay here so components import from one place.
 export interface Asset {
   symbol: string;
   address: string;
@@ -70,26 +72,31 @@ export interface Credentials {
   initData?: string;
 }
 
-// credentials: "include" so the HttpOnly session cookie rides along on every call.
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { credentials: "include", ...init });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `Request failed (${res.status})`);
+// ── Server functions (imported from the server module) ────────────────────────
+import {
+  closeSessionFn,
+  getRescuesFn,
+  getSessionFn,
+  getStatusFn,
+  openSessionFn,
+} from "./server/api.js";
+
+/** Response-shape guard: a server fn returns data or a Response (error). */
+async function unwrap<T>(r: unknown): Promise<T> {
+  if (r instanceof Response) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Request failed (${r.status})`);
   }
-  return res.json() as Promise<T>;
+  return r as T;
 }
 
-export const getSession = () => request<SessionState>("/api/session");
+export const getSession = () => getSessionFn().then((r) => unwrap<SessionState>(r));
 
 export const openSession = (creds: Credentials) =>
-  request<SessionState>("/api/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(creds),
-  });
+  openSessionFn({ data: creds }).then((r) => unwrap<SessionState>(r));
 
-export const closeSession = () => request<SessionState>("/api/session", { method: "DELETE" });
+export const closeSession = () => closeSessionFn().then((r) => unwrap<SessionState>(r));
 
-export const getStatus = () => request<Status>("/api/status");
-export const getRescues = () => request<Rescue[]>("/api/rescues");
+export const getStatus = () => getStatusFn().then((r) => unwrap<Status>(r));
+
+export const getRescues = () => getRescuesFn().then((r) => unwrap<Rescue[]>(r));

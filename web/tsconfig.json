@@ -16,7 +16,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "~/*": ["./src/*"]
+      "~/*": ["./src/*"],
+      "@guardian/server/*": ["../server/*"],
+      "@guardian/src/*": ["../src/*"]
     }
   },
   "include": ["src", "app.config.ts"]

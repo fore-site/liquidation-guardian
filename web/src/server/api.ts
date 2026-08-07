@@ -1,0 +1,243 @@
+/**
+ * API server functions for the Guardian — the /api/* endpoints, ported to
+ * TanStack Start server functions. The browser calls these directly (they run
+ * server-side); the KeeperHub key never leaves the server.
+ *
+ * Cookie-setting endpoints (session POST/DELETE) return a `Response` so the
+ * Set-Cookie header rides along; data endpoints return plain JSON.
+ */
+import { createServerFn } from "@tanstack/react-start";
+import { getContext, ensureBooted } from "./bootstrap.js";
+import { COOKIE, readSid, sessionCookieHeader, sessionMiddleware } from "./session.js";
+import { verifyInitData } from "@guardian/server/verifyInitData.js";
+import { publicRecord, type GuardianRecord } from "@guardian/server/store.js";
+import { buildStatus } from "./status.js";
+import { getRescues } from "@guardian/server/rescues.js";
+
+const CACHE_MS = 10_000;
+const cache = new Map<string, { at: number; value: unknown }>();
+
+async function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < CACHE_MS) return hit.value as T;
+  const value = await fn();
+  cache.set(key, { at: now, value });
+  return value;
+}
+
+function clampHf(n: number): number {
+  if (!Number.isFinite(n)) return 1.5;
+  return Math.min(5, Math.max(1.01, n));
+}
+
+/** 429 on limit, else false. Fails open on limiter errors (Redis down). */
+async function limited(key: string, consume: (k: string) => Promise<{ ok: boolean; retryAfterSec: number }>): Promise<{ limited: boolean; retryAfterSec: number }> {
+  const r = await consume(key);
+  return { limited: !r.ok, retryAfterSec: r.retryAfterSec };
+}
+
+// ── GET /api/health ───────────────────────────────────────────────────────────
+
+export const healthFn = createServerFn({ method: "GET" }).handler(async () => {
+  await ensureBooted();
+  const { store } = getContext();
+  return { ok: true, redis: store.isReady, time: new Date().toISOString() };
+});
+
+// ── GET /api/session ──────────────────────────────────────────────────────────
+
+export const getSessionFn = createServerFn({ method: "GET" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+  await ensureBooted();
+  const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+  const record = sid ? await getContext().store.getById(sid) : null;
+  return record
+    ? { authenticated: true, config: publicRecord(record) }
+    : { authenticated: false };
+});
+
+// ── POST /api/session ─────────────────────────────────────────────────────────
+
+export const openSessionFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .validator((d: unknown) => d as {
+    keeperHubApiKey: string;
+    wallet: string;
+    chainId?: string;
+    hfThreshold?: number;
+    hfTarget?: number;
+    initData?: string;
+  })
+  .handler(async ({ data, context }) => {
+    await ensureBooted();
+    const { store, cfg, bot, limiters } = getContext();
+
+    // Strict rate limit by IP — protects onboarding from key-guessing / abuse.
+    const ip = (context as unknown as { ip?: string }).ip ?? "unknown";
+    const rl = await limited(ip, limiters.sessionPost);
+    if (rl.limited) {
+      return new Response(JSON.stringify({ error: `Rate limit exceeded. Retry in ${rl.retryAfterSec}s.` }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": String(rl.retryAfterSec) },
+      });
+    }
+
+    const keeperHubApiKey = String(data.keeperHubApiKey ?? "").trim();
+    const wallet = String(data.wallet ?? "").trim();
+    const chainId = String(data.chainId ?? "11155111").trim();
+    const hfThreshold = clampHf(Number(data.hfThreshold ?? 1.5));
+    const hfTarget = clampHf(Number(data.hfTarget ?? 2.0));
+    const initData = typeof data.initData === "string" ? data.initData : "";
+
+    if (!/^kh_[A-Za-z0-9]+$/.test(keeperHubApiKey)) {
+      return json(400, { error: "That doesn't look like a KeeperHub API key (kh_…)." });
+    }
+    if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+      return json(400, { error: "Enter a valid wallet address (0x + 40 hex characters)." });
+    }
+    if (!(hfTarget > hfThreshold)) {
+      return json(400, { error: "Restore target must be above the act-below threshold." });
+    }
+
+    let telegramUserId: number | undefined;
+    let telegramChatId: number | undefined;
+    let telegramUsername: string | undefined;
+    if (initData) {
+      if (!cfg.telegramBotToken) {
+        return json(400, { error: "Telegram onboarding isn't enabled on this server." });
+      }
+      const verified = verifyInitData(initData, cfg.telegramBotToken);
+      if (!verified) {
+        return json(400, { error: "Couldn't verify your Telegram session. Reopen the app and retry." });
+      }
+      telegramUserId = verified.userId;
+      telegramChatId = verified.userId; // private chat id == user id
+      telegramUsername = verified.username;
+    }
+
+    // Prove the key + wallet actually work before we accept them.
+    const probe = store.keeperHubFor({
+      id: "probe",
+      wallet,
+      chainId,
+      hfThreshold,
+      hfTarget,
+      encKey: store.encrypt(keeperHubApiKey),
+      autoMode: false,
+      createdAt: Date.now(),
+    });
+    try {
+      await probe.readAavePosition(chainId, wallet);
+    } catch {
+      return json(400, {
+        error: "Couldn't read that wallet with that key. Check the key, wallet, and network.",
+      });
+    }
+
+    const record = await store.upsertByWallet({
+      wallet,
+      chainId,
+      keeperHubApiKey,
+      hfThreshold,
+      hfTarget,
+      telegramUserId,
+      telegramChatId,
+      telegramUsername,
+    });
+    cache.delete(`${record.id}:status`);
+
+    if (telegramChatId != null && bot) void bot.notifyOnboarded(record);
+
+    // Set the session cookie on the response.
+    return new Response(JSON.stringify({ authenticated: true, config: publicRecord(record) }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookieHeader(record.id) },
+    });
+  });
+
+// ── DELETE /api/session ───────────────────────────────────────────────────────
+
+export const closeSessionFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+  await ensureBooted();
+  const { store } = getContext();
+  const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+  if (sid) {
+    const record = await store.getById(sid);
+    // A pure web session: forget the credential. A Telegram-bound record stays
+    // so the bot keeps watching — /stop in the bot removes that one.
+    if (record && record.telegramUserId == null) await store.remove(sid);
+    for (const k of cache.keys()) if (k.startsWith(`${sid}:`)) cache.delete(k);
+  }
+  return new Response(JSON.stringify({ authenticated: false }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookieHeader("", true) },
+  });
+});
+
+// ── GET /api/status ───────────────────────────────────────────────────────────
+
+export const getStatusFn = createServerFn({ method: "GET" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+  await ensureBooted();
+  const { store, limiters } = getContext();
+  const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+  const record = sid ? await store.getById(sid) : null;
+  if (!record) {
+    return new Response(JSON.stringify({ error: "Not connected. Add your KeeperHub details first." }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  const rl = await limited(record.id, limiters.reads);
+  if (rl.limited) {
+    return new Response(JSON.stringify({ error: `Rate limit exceeded. Retry in ${rl.retryAfterSec}s.` }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": String(rl.retryAfterSec) },
+    });
+  }
+  // Dirty flag → bypass the 10s cache so an autonomous rescue shows instantly.
+  const dirty = await store.checkAndClearDirty(record.id);
+  const status = dirty ? await buildStatus(record) : await cached(`${record.id}:status`, () => buildStatus(record));
+  void store.appendHfSnapshot(record.id, status.healthFactor).catch(() => undefined);
+  return status;
+});
+
+// ── GET /api/rescues ──────────────────────────────────────────────────────────
+
+export const getRescuesFn = createServerFn({ method: "GET" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+  await ensureBooted();
+  const { store, limiters } = getContext();
+  const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+  const record = sid ? await store.getById(sid) : null;
+  if (!record) {
+    return new Response(JSON.stringify({ error: "Not connected. Add your KeeperHub details first." }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  const rl = await limited(record.id, limiters.reads);
+  if (rl.limited) {
+    return new Response(JSON.stringify({ error: `Rate limit exceeded. Retry in ${rl.retryAfterSec}s.` }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": String(rl.retryAfterSec) },
+    });
+  }
+  return cached(`${record.id}:rescues`, () => getRescues(store, record.wallet));
+});
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export { COOKIE, readSid };
+export type { GuardianRecord };

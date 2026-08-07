@@ -55,10 +55,10 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
       };
       const { config } = await openSession(creds);
       if (config) {
-        // Standalone page (/start.html): jump to the dashboard SPA. Inline
-        // (the Mini App flow in app.html): switch the SPA to the dashboard.
+        // Standalone page (/start): jump to the dashboard route. Inline
+        // (the Mini App flow in /app): switch to the dashboard.
         if (onConnected) onConnected(config);
-        else window.location.href = "/app.html";
+        else window.location.href = "/app";
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't connect");

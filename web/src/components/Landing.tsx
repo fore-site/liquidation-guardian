@@ -24,7 +24,7 @@ export function Landing() {
           An AI agent that keeps your Aave borrow position safe from liquidation —
           deciding the cheapest fix, then executing it onchain through KeeperHub.
         </p>
-        <a className="primary landing-cta" href="/start.html">
+        <a className="primary landing-cta" href="/start">
           Get started
         </a>
       </header>
