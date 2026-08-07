@@ -11,9 +11,10 @@ import { initTelegram, isInTelegram, telegramInitData } from "../telegram.js";
  * `initData` so the server can bind the credential to the verified Telegram user and
  * push alerts to that chat — the key still goes straight over HTTPS, never through chat.
  */
-export function Onboarding({ onConnected }: { onConnected: (config: SessionConfig) => void }) {
+export function Onboarding({ onConnected }: { onConnected?: (config: SessionConfig) => void }) {
   const [apiKey, setApiKey] = useState("");
   const [wallet, setWallet] = useState("");
+  const [profile, setProfile] = useState<"conservative" | "efficient" | null>(null);
   const [threshold, setThreshold] = useState(1.5);
   const [target, setTarget] = useState(2.0);
   const [busy, setBusy] = useState(false);
@@ -25,8 +26,20 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
     initTelegram();
   }, []);
 
-  const targetFloor = Math.round((threshold + 0.1) * 100) / 100;
+  // Defense profiles preset the threshold/target sliders (frontend-only presets —
+  // the backend just receives the numbers).
+  function pickProfile(p: "conservative" | "efficient") {
+    setProfile(p);
+    if (p === "conservative") {
+      setThreshold(1.6);
+      setTarget(2.0);
+    } else {
+      setThreshold(1.1);
+      setTarget(1.5);
+    }
+  }
 
+  const targetFloor = Math.round((threshold + 0.1) * 100) / 100;
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -41,7 +54,12 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
         ...(inTelegram ? { initData: telegramInitData() } : {}),
       };
       const { config } = await openSession(creds);
-      if (config) onConnected(config);
+      if (config) {
+        // Standalone page (/start.html): jump to the dashboard SPA. Inline
+        // (the Mini App flow in app.html): switch the SPA to the dashboard.
+        if (onConnected) onConnected(config);
+        else window.location.href = "/app.html";
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't connect");
     } finally {
@@ -52,6 +70,9 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
   return (
     <div className="onboarding">
       <div className="onboarding-card">
+        <a className="onboarding-back" href="/">
+          ← Back to home
+        </a>
         <h1>Liquidation Guardian</h1>
 
         <form onSubmit={submit}>
@@ -81,6 +102,29 @@ export function Onboarding({ onConnected }: { onConnected: (config: SessionConfi
             />
             <small>Wallet holding the Aave position to protect (Sepolia).</small>
           </label>
+
+          <div className="profiles">
+            <span className="profiles-label">Defense profile</span>
+            <div className="profile-options">
+              <button
+                type="button"
+                className={`profile ${profile === "conservative" ? "selected" : ""}`}
+                onClick={() => pickProfile("conservative")}
+              >
+                <strong>The Conservative</strong>
+                <small>Act early — prioritize absolute safety.</small>
+              </button>
+              <button
+                type="button"
+                className={`profile ${profile === "efficient" ? "selected" : ""}`}
+                onClick={() => pickProfile("efficient")}
+              >
+                <strong>The Capital Efficient</strong>
+                <small>Ride the edge — maximize yield.</small>
+              </button>
+            </div>
+            <small>Presets the thresholds below; fine-tune anytime.</small>
+          </div>
 
           <div className="sliders">
             <label>

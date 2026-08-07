@@ -27,6 +27,9 @@ import {
 import { runAgenticRescue } from "./agent.js";
 import { SEPOLIA_POOL, SEPOLIA_RESERVES, VARIABLE_RATE_MODE, type ReserveInfo } from "./assets.js";
 import { readPriceUsd } from "./prices.js";
+import { rpc } from "../../server/rescues.js";
+
+const DEFAULT_RPC = process.env.SEPOLIA_RPC_URL?.trim() || "https://ethereum-sepolia.publicnode.com";
 
 const logger = createLogger("guardian");
 /** Human-facing pass log (plain console lines for the CLI demo). */
@@ -320,6 +323,22 @@ export async function buildSnapshot(
     }),
   );
 
+  // Gas awareness: fetch the network gas price (via the same public RPC used for
+  // event reads) + the ETH/USD price, so each lever can show an estimated gas
+  // cost in the LLM prompt. Both degrade gracefully to null on failure — the
+  // decision layer simply sees no gas figure (same as before this feature).
+  let gasPriceGwei: number | null = null;
+  let ethPriceUsd: number | null = null;
+  try {
+    const gasRaw = await rpc(DEFAULT_RPC, "eth_gasPrice", []);
+    if (typeof gasRaw === "string") {
+      gasPriceGwei = Number(BigInt(gasRaw)) / 1e9; // wei → Gwei
+    }
+  } catch (err) {
+    logger.warn("gas price read failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+  ethPriceUsd = await readPriceUsd(keeperHub, chainId, "WETH");
+
   return {
     healthFactor: position.healthFactor,
     totalDebtUsd: position.totalDebtUsd,
@@ -329,6 +348,8 @@ export async function buildSnapshot(
     collaterals,
     walletBalances,
     allowances,
+    gasPriceGwei,
+    ethPriceUsd,
   };
 }
 

@@ -104,9 +104,18 @@ export class EventWatcher {
   start(): void {
     if (this.running) return;
     this.running = true;
-    console.log(
-      `[event-watcher] watching ${USER_EVENT_TOPICS.length} user-event topics + price topic on ${SEPOLIA_POOL} (${this.pollMs}ms poll)`,
-    );
+    // Resume from the persisted cursor so a restart doesn't re-scan or miss
+    // blocks. Fall back to a catch-up window when no cursor is saved yet.
+    void this.store
+      .getWatcherCursor()
+      .then((c) => {
+        this.lastSeenBlock = c ?? 0;
+        console.log(
+          `[event-watcher] watching ${USER_EVENT_TOPICS.length} user-event topics + price topic on ${SEPOLIA_POOL} (${this.pollMs}ms poll)` +
+            (c ? ` — resuming from block ${c}` : " — no cursor, first-run catch-up"),
+        );
+      })
+      .catch(() => undefined);
     void this.loop();
   }
 
@@ -164,6 +173,13 @@ export class EventWatcher {
     this.lastSeenBlock = latest;
     if (priceHit && priceDue) this.lastPriceCheck = Date.now();
 
+    // Persist the cursor so a restart resumes from here (no gaps, no re-scan).
+    await this.store.setWatcherCursor(latest);
+
+    // Index any new Repay/Supply events into each wallet's Redis history so the
+    // dashboard reads from Redis instead of scanning the chain every poll.
+    if (userHit) await this.indexHistory(from, to);
+
     if ((userHit || (priceHit && priceDue)) && !this.reReadInFlight) {
       // Fire-and-forget: a slow runCheck (KeeperHub REST / LLM / broadcast) must
       // NOT pause the poll loop — the watcher stays reactive to new blocks while
@@ -172,6 +188,33 @@ export class EventWatcher {
       void this.reReadAll().finally(() => {
         this.reReadInFlight = false;
       });
+    }
+  }
+
+  /**
+   * Decode Repay + Supply events in [from, to] and append them to each stored
+   * wallet's Redis history (the dashboard's /api/rescues reads this instead of
+   * scanning the chain). Best-effort: a decode/RPC failure just skips the window.
+   */
+  private async indexHistory(from: number, to: number): Promise<void> {
+    const records = await this.store.all().catch(() => []);
+    if (records.length === 0) return;
+    const wallets = new Set(records.map((r) => r.wallet.toLowerCase()));
+    const [repays, supplies] = await Promise.all([
+      getPoolLogs(this.rpcUrl, [REPAY_TOPIC], from, to),
+      getPoolLogs(this.rpcUrl, [SUPPLY_TOPIC], from, to),
+    ]);
+    const byWallet = new Map<string, Array<{ type: "repay" | "supply"; block: number }>>();
+    for (const log of repays) {
+      const user = topicToAddress(log.topics[2]);
+      if (wallets.has(user)) push(byWallet, user, { type: "repay", block: parseInt(log.blockNumber, 16) });
+    }
+    for (const log of supplies) {
+      const onBehalf = topicToAddress(log.topics[2]);
+      if (wallets.has(onBehalf)) push(byWallet, onBehalf, { type: "supply", block: parseInt(log.blockNumber, 16) });
+    }
+    for (const [wallet, events] of byWallet) {
+      await this.store.appendRescues(wallet, events).catch(() => undefined);
     }
   }
 
@@ -198,6 +241,18 @@ export class EventWatcher {
       }),
     );
   }
+}
+
+/** Append to a map-of-arrays. */
+function push<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const arr = map.get(key);
+  if (arr) arr.push(value);
+  else map.set(key, [value]);
+}
+
+/** Extract the 20-byte address from a 32-byte topic word. */
+function topicToAddress(topic: string): string {
+  return "0x" + topic.replace(/^0x/, "").slice(24).toLowerCase();
 }
 
 /**

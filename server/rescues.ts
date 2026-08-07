@@ -19,6 +19,7 @@
  * wallet finds exactly this user's actions.
  */
 import { SEPOLIA_POOL, SEPOLIA_RESERVES, type ReserveInfo } from "../src/agent/assets.js";
+import type { GuardianStore } from "./store.js";
 
 const DEFAULT_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
 // How far back to look. Sepolia is ~12s/block, so 250k blocks ≈ a month — plenty
@@ -47,10 +48,24 @@ const RESERVE_BY_ADDRESS: Record<string, ReserveInfo> = Object.fromEntries(
 );
 
 /**
- * Read this user's Repay + Supply history from the Aave Pool, newest first.
- * Best-effort: a flaky RPC returns an empty list rather than breaking the dashboard.
+ * Read this user's Repay + Supply history, newest first. Served from the
+ * Redis-backed history the event watcher indexes (fast, no RPC on every poll).
+ * On first run (no cursor yet) it backfills the lookback window once and stores
+ * the result. Best-effort: a flaky RPC returns an empty list rather than
+ * breaking the dashboard.
  */
-export async function getRescues(user: string): Promise<RescueEvent[]> {
+export async function getRescues(
+  store: GuardianStore,
+  user: string,
+): Promise<RescueEvent[]> {
+  // Fast path: history already indexed → read from Redis.
+  const cursor = await store.getRescuesCursor(user);
+  if (cursor != null) {
+    const cached = await store.getRescues(user);
+    return cached as RescueEvent[];
+  }
+
+  // Backfill path: first run for this wallet — scan the lookback window once.
   const rpcUrl = process.env.SEPOLIA_RPC_URL?.trim() || DEFAULT_RPC;
   const lookback = Number(process.env.RESCUE_LOOKBACK_BLOCKS || DEFAULT_LOOKBACK);
 
@@ -73,8 +88,13 @@ export async function getRescues(user: string): Promise<RescueEvent[]> {
     const e = decodeLog(log, "supply");
     if (e) events.push(e);
   }
+  events.sort((a, b) => b.block - a.block);
 
-  return events.sort((a, b) => b.block - a.block);
+  // Store the backfill + set the cursor so the watcher continues incrementally.
+  await store.appendRescues(user, events).catch(() => undefined);
+  await store.setRescuesCursor(user, latestBlock).catch(() => undefined);
+
+  return events;
 }
 
 export interface RawLog {

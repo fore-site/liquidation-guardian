@@ -9,6 +9,13 @@ executes it onchain with simulation, gas backoff, retries, and a full audit trai
 
 **Workflow watches. LLM decides. KeeperHub executes.**
 
+Three things make it different: **dynamic risk awareness** (the LLM weighs the cost
+of each fix, including gas, instead of following rigid rules), **one-click defense
+profiles** (Conservative or Capital Efficient, in plain English), and **non-custodial
+trust** (the agent only carries limited execution permission — it can never withdraw
+to an external wallet). A landing page with an avoided-loss ROI calculator is in
+`web/`.
+
 ## Status
 
 Under active development for the hackathon (deadline 2026-08-13). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

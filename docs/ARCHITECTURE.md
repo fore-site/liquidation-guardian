@@ -37,9 +37,10 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
    there's a real        │  LLM Decision Layer  (OpenAI-compatible)     │
    decision to make      │                                              │
                         │  Inputs: HF, collateral, debt, wallet        │
-                        │  balances + Aave Pool allowance              │
+                        │  balances + Aave Pool allowance, gas cost     │
+                        │  per lever (when the RPC provides a price)    │
                         │  Decides: repay vs add-collateral, + amount   │
-                        │  to restore HF to TARGET                     │
+                        │  to restore HF to TARGET at lowest cost       │
                         └────────┬─────────────────────────────────────┘
                                  ▼
                         ┌─────────────────────────────────────────────┐
@@ -76,6 +77,14 @@ is exactly KeeperHub's last-mile problem — which is why this project fits the 
   Lever executability is checked before the LLM: repay/supply are only offered when the wallet
   balance and Aave Pool allowance cover the sized amount — simulate-first is the final safety net,
   not the first one.
+- **Gas awareness:** `buildSnapshot` fetches the network gas price (`eth_gasPrice` via the public
+  RPC) + the ETH/USD price, and `computeCandidates` attaches an estimated `gasCostUsd` per lever
+  (repay ≈150k gas, supply ≈200k — an estimate for the LLM's cost comparison; the authoritative
+  number is the simulate step's gas estimate). When gas is known, the prompt asks the LLM to pick
+  the lever at the **lowest total cost (tokens + gas)**; when the RPC is down it degrades to the
+  capital-efficiency guidance. On Sepolia gas is sponsored by KeeperHub (often $0), so the figure
+  is mostly informational there — but the mechanism is real and matters on chains without
+  sponsorship.
 - **`scripts/`** — setup & verification: first-tx dry-run, health checks, sizing tests, workflow deploy.
 - **`server/` + `web/`** — the hosted face: an observer dashboard **and** a Telegram bot, in one
   node process (port 8787). `server/` holds each user's KeeperHub key **encrypted at rest**

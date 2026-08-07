@@ -1,18 +1,22 @@
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import tailwindcss from "@tailwindcss/vite";
+import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { nitro } from "nitro/vite";
 
-// The dashboard talks only to the local API server (which holds the KeeperHub
-// key). Proxy /api there in dev so the browser never needs a cross-origin call
-// and never sees a credential.
 export default defineConfig({
-  plugins: [react()],
   server: {
-    port: 5173,
-    proxy: {
-      "/api": {
-        target: "http://localhost:8787",
-        changeOrigin: true,
-      },
-    },
+    port: 3000,
   },
+  resolve: {
+    tsconfigPaths: true,
+  },
+  plugins: [
+    tailwindcss(),
+    tanstackStart({
+      srcDirectory: "src",
+    }),
+    viteReact(),
+    nitro(),
+  ],
 });

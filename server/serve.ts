@@ -35,6 +35,7 @@ import { EventWatcher } from "./event-watcher.js";
 import { GuardianStore, publicRecord, type GuardianRecord } from "./store.js";
 import { verifyInitData } from "./verifyInitData.js";
 import { GuardianBot } from "./bot.js";
+import { buildApiLimiters } from "./rate-limit.js";
 
 const PORT = Number(process.env.DASHBOARD_PORT || 8787);
 const WEB_DIST = join(process.cwd(), "web", "dist");
@@ -71,6 +72,22 @@ let bot: GuardianBot | null = null;
 
 const CACHE_MS = 10_000;
 const cache = new Map<string, { at: number; value: unknown }>();
+
+// Rate limiters (Redis-backed sliding window) built once at boot.
+const limiters = buildApiLimiters(store);
+
+/** Apply a limiter; on limit respond 429 with Retry-After. Returns true if limited. */
+async function limited(
+  res: ServerResponse,
+  consume: (key: string) => Promise<{ ok: boolean; retryAfterSec: number }>,
+  key: string,
+): Promise<boolean> {
+  const r = await consume(key);
+  if (r.ok) return false;
+  res.setHeader("Retry-After", String(r.retryAfterSec));
+  json(res, 429, { error: `Rate limit exceeded. Retry in ${r.retryAfterSec}s.` });
+  return true;
+}
 
 async function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
@@ -176,7 +193,12 @@ async function route(req: IncomingMessage, res: ServerResponse, url: string): Pr
     return json(res, 200, { ok: true, redis: store.isReady, time: new Date().toISOString() });
   }
 
-  if (url === "/api/session" && req.method === "POST") return openSession(req, res);
+  if (url === "/api/session" && req.method === "POST") {
+    // Strict, by IP — protects onboarding from key-guessing / abuse.
+    const ip = req.socket.remoteAddress ?? "unknown";
+    if (await limited(res, limiters.sessionPost, ip)) return;
+    return openSession(req, res);
+  }
   if (url === "/api/session" && req.method === "DELETE") return closeSession(req, res);
   if (url === "/api/session" && req.method === "GET") {
     const record = await getRecord(req);
@@ -191,10 +213,19 @@ async function route(req: IncomingMessage, res: ServerResponse, url: string): Pr
   if (url === "/api/status" || url === "/api/rescues") {
     const record = await getRecord(req);
     if (!record) return json(res, 401, { error: "Not connected. Add your KeeperHub details first." });
+    // Per-record read cap so a stuck dashboard can't hammer KeeperHub/RPC.
+    if (await limited(res, limiters.reads, record.id)) return;
     if (url === "/api/status") {
-      return json(res, 200, await cached(`${record.id}:status`, () => buildStatus(record)));
+      // Dirty flag → bypass the 10s cache so an autonomous rescue shows instantly.
+      const dirty = await store.checkAndClearDirty(record.id);
+      const status = dirty
+        ? await buildStatus(record)
+        : await cached(`${record.id}:status`, () => buildStatus(record));
+      // Record an HF snapshot for the dashboard chart (capped in the store).
+      void store.appendHfSnapshot(record.id, status.healthFactor).catch(() => undefined);
+      return json(res, 200, status);
     }
-    return json(res, 200, await cached(`${record.id}:rescues`, () => getRescues(record.wallet)));
+    return json(res, 200, await cached(`${record.id}:rescues`, () => getRescues(store, record.wallet)));
   }
 
   if (url.startsWith("/api/")) return json(res, 404, { error: "Not found" });
@@ -348,9 +379,12 @@ async function serveStatic(url: string, res: ServerResponse): Promise<void> {
 
   let data = await readFile(filePath).catch(() => null);
   if (data === null) {
-    // SPA fallback: unknown non-file route → index.html.
-    filePath = join(WEB_DIST, "index.html");
-    data = await readFile(filePath).catch(() => null);
+    // Multi-page app: only the root falls back to the landing index.html; a
+    // genuinely unknown path is a 404, not a silent SPA rewrite.
+    if (url === "/" || url === "" || url.endsWith("/")) {
+      filePath = join(WEB_DIST, "index.html");
+      data = await readFile(filePath).catch(() => null);
+    }
     if (data === null) {
       return end(res, 404, "UI not built. Run `npm run build` in web/ (or use the Vite dev server).");
     }
@@ -416,7 +450,9 @@ async function main(): Promise<void> {
       store,
       botToken: cfg.telegramBotToken,
       llm,
-      webAppUrl: cfg.webAppUrl,
+      // The Mini App opens the dashboard SPA (which session-gates and shows
+      // onboarding inline); the root is the marketing landing page.
+      webAppUrl: cfg.webAppUrl ? `${cfg.webAppUrl.replace(/\/$/, "")}/app.html` : "",
       watchIntervalMs: cfg.watchIntervalMs,
     });
     await bot.start();

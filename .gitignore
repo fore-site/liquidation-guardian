@@ -14,6 +14,10 @@ dist/
 npm-debug.log*
 *.tsbuildinfo
 
+# TanStack Start / nitro build artifacts
+web/.nitro/
+web/.output/
+
 # Editor / OS
 .DS_Store
 .vscode/
@@ -23,3 +27,6 @@ npm-debug.log*
 .playwright-mcp/
 
 hackathon_brief.txt
+
+
+

@@ -72,6 +72,17 @@ export interface PositionSnapshot {
    * levers are gated on the Pool being allowed to pull the amount. Absent = unknown.
    */
   allowances?: Record<string, bigint>;
+  /**
+   * Current network gas price in Gwei, when known (fetched via RPC). Absent/null =
+   * unknown — the LLM simply sees no gas figure and falls back to the
+   * capital-efficiency guidance.
+   */
+  gasPriceGwei?: number | null;
+  /**
+   * ETH price in USD, when known — needed to convert gas (paid in ETH) to a USD
+   * figure per lever. Absent/null = gas cost can't be priced.
+   */
+  ethPriceUsd?: number | null;
 }
 
 /** A single, executable rescue instruction, sized in token base units. */
@@ -90,6 +101,26 @@ export interface RescueDecision {
 }
 
 const DEFAULT_BUFFER_BPS = 50;
+
+// Approximate gas usage per Aave write, in gas units (contract-call sized —
+// the execution-model doc measured ~75k for a simple transfer; Aave repay/supply
+// are larger). Used ONLY to give the LLM a rough per-lever cost comparison; the
+// authoritative figure is the simulate step's gas estimate.
+const GAS_REPAY = 150_000;
+const GAS_SUPPLY = 200_000;
+/** Gwei → ETH: 1e-9 ETH per Gwei. */
+const GWEI_TO_ETH = 1e-9;
+
+/**
+ * Estimated USD gas cost of an action. Returns null when the gas price or ETH
+ * price is unknown (the caller then omits the figure from the prompt).
+ */
+function gasCostUsd(snap: PositionSnapshot, gasUnits: number): number | null {
+  const gwei = snap.gasPriceGwei;
+  const ethUsd = snap.ethPriceUsd;
+  if (gwei == null || gwei <= 0 || ethUsd == null || ethUsd <= 0) return null;
+  return gasUnits * gwei * GWEI_TO_ETH * ethUsd;
+}
 
 // ── Pure sizing functions (unit-tested; see scripts/test-sizing.ts) ───────────
 
@@ -204,6 +235,12 @@ export interface RescueCandidate {
   available: boolean;
   /** Why it's unavailable, if so. */
   note?: string;
+  /**
+   * Estimated gas cost of this lever in USD, when the gas price and a usable
+   * token price are known. An estimate for the LLM's cost comparison — the
+   * authoritative number is the simulate step's gas estimate.
+   */
+  gasCostUsd?: number | null;
 }
 
 /**
@@ -237,6 +274,7 @@ export function computeCandidates(
         reachesTarget,
         available: units > 0n && gate.available,
         note: units > 0n ? gate.note : "computed amount is zero",
+        gasCostUsd: gasCostUsd(snap, GAS_REPAY),
       });
     } catch (err) {
       out.push({
@@ -266,6 +304,7 @@ export function computeCandidates(
         reachesTarget: units > 0n, // supply is never capped — it always reaches target
         available: units > 0n && gate.available,
         note: units > 0n ? gate.note : "computed amount is zero",
+        gasCostUsd: gasCostUsd(snap, GAS_SUPPLY),
       });
     } catch (err) {
       out.push({
@@ -425,19 +464,22 @@ export async function decideRescue(
     throw new Error("No available rescue lever (every option is unpriceable or zero-sized).");
   }
 
+  const gasSuffix = (c: RescueCandidate): string =>
+    c.gasCostUsd != null && c.gasCostUsd > 0 ? ` (gas ~$${c.gasCostUsd.toFixed(2)})` : "";
   const repayLines = candidates
     .filter((c) => c.action === "repay")
     .map((c) =>
       c.available
         ? `  • repay ${fmt(c.amountHuman)} ${c.asset.symbol}` +
-          (c.reachesTarget ? "" : " (partial — largest single repay can't reach target alone)")
+          (c.reachesTarget ? "" : " (partial — largest single repay can't reach target alone)") +
+          gasSuffix(c)
         : `  • repay ${c.asset.symbol} — unavailable (${c.note})`,
     );
   const supplyLines = candidates
     .filter((c) => c.action === "supply")
     .map((c) =>
       c.available
-        ? `  • supply ${fmt(c.amountHuman)} ${c.asset.symbol} more collateral`
+        ? `  • supply ${fmt(c.amountHuman)} ${c.asset.symbol} more collateral` + gasSuffix(c)
         : `  • supply ${c.asset.symbol} — unavailable (${c.note})`,
     );
 
@@ -446,6 +488,20 @@ export async function decideRescue(
   const historyLine = history
     ? `Previous actions in this rescue run: ${history}`
     : "This is the first decision of this rescue run.";
+
+  // Gas-aware guidance only when the snapshot carries a gas price — otherwise the
+  // LLM falls back to the capital-efficiency rule.
+  const gasKnown = snapshot.gasPriceGwei != null && snapshot.gasPriceGwei > 0;
+  const costGuidance = gasKnown
+    ? [
+        `Choose the lever that restores HF to target at the LOWEST TOTAL COST to the user`,
+        `(tokens spent + the gas estimate shown per lever). If two levers are close, prefer`,
+        `repay when the debt asset is on hand.`,
+      ]
+    : [
+        `Prefer repay when the debt asset is on hand (more capital-efficient, frees`,
+        `borrowing power); prefer supply when you'd rather not spend down the debt asset.`,
+      ];
 
   const prompt = [
     `A DeFi borrow position on Aave v3 is approaching liquidation.`,
@@ -466,8 +522,7 @@ export async function decideRescue(
     fundsLine,
     ``,
     `Choose ONE lever and call submit_rescue_decision with its action and assetSymbol.`,
-    `Prefer repay when the debt asset is on hand (more capital-efficient, frees`,
-    `borrowing power); prefer supply when you'd rather not spend down the debt asset.`,
+    ...costGuidance,
     `Only pick an asset listed as available. If no lever is available, do NOT invent`,
     `one — the caller will fall back to a deterministic safeguard.`,
   ].join("\n");

@@ -351,6 +351,19 @@ export class GuardianBot {
     if (record.lastAlertAt && Date.now() - record.lastAlertAt < ALERT_COOLDOWN_MS) return;
 
     if (record.autoMode) {
+      // Per-record hourly rescue cap — a buggy loop must not burn funds or
+      // rate-limit the KeeperHub key. Build the limiter on demand (Redis-backed).
+      const { buildRateLimiter } = await import("./rate-limit.js");
+      const rescueCap = buildRateLimiter(this.store, {
+        points: Number(process.env.RATE_LIMIT_RESCUES_HOUR || 5),
+        durationSec: 3600,
+        keyPrefix: "guardian:rl:rescue",
+      });
+      const cap = await rescueCap(record.id);
+      if (!cap.ok) {
+        console.log(`[bot] rescue cap hit for ${short(record.wallet)} — skipping this tick (retry in ${cap.retryAfterSec}s).`);
+        return;
+      }
       let result;
       try {
         result = await runAgenticRescue({
@@ -376,6 +389,10 @@ export class GuardianBot {
       }
       // Only after a completed pass (any outcome) do we de-dupe the next tick.
       await this.store.markAlerted(record.id);
+      // Mark the status cache dirty so the dashboard shows the new HF instantly.
+      if (result.status === "goal_met" || result.steps.length > 0) {
+        await this.store.setDirty(record.id).catch(() => undefined);
+      }
       await this.tg.sendMessage(chatId, `🤖 Auto-rescue triggered.\n${this.renderAgentRun(result)}`);
       return;
     }

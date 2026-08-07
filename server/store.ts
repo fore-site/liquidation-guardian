@@ -74,6 +74,16 @@ const TG_INDEX = (userId: number) => `guardian:tg:${userId}`;
 const WALLET_INDEX = (wallet: string, chainId: string) =>
   `guardian:wallet:${chainId}:${wallet.toLowerCase()}`;
 const ALL_SET = "guardian:all";
+const RESCUES = (wallet: string) => `guardian:rescues:${wallet.toLowerCase()}`;
+const RESCUES_CURSOR = (wallet: string) => `guardian:rescues-cursor:${wallet.toLowerCase()}`;
+const WATCHER_CURSOR = "guardian:watcher-cursor";
+const DIRTY = (id: string) => `guardian:dirty:${id}`;
+const LINK_CODE = (code: string) => `guardian:link:${code.toLowerCase()}`;
+const HF_SNAPSHOTS = (id: string) => `guardian:hf:${id}`;
+/** Cap on stored decoded rescues per wallet (oldest dropped). */
+const MAX_RESCUES = 100;
+/** Cap on stored HF snapshots per record (oldest dropped). */
+const MAX_HF_SNAPSHOTS = 200;
 
 /**
  * The store. Construct once at boot with the server config, `await connect()`, then
@@ -109,6 +119,15 @@ export class GuardianStore {
   /** True if the underlying Redis socket is currently usable. */
   get isReady(): boolean {
     return this.redis.isOpen && this.redis.isReady;
+  }
+
+  /**
+   * The shared Redis client — used by the rate limiter (Redis-backed
+   * rate-limiter-flexible) so one connection holds records, cursors, flags, and
+   * rate-limit counters.
+   */
+  get redisClient(): RedisClientType {
+    return this.redis;
   }
 
   async close(): Promise<void> {
@@ -254,6 +273,119 @@ export class GuardianStore {
     if (!rec) return;
     rec.lastAlertAt = at;
     await this.save(rec);
+  }
+
+  /** Update a record's config (threshold/target). Validates target > threshold. */
+  async updateConfig(
+    id: string,
+    patch: { hfThreshold?: number; hfTarget?: number },
+  ): Promise<GuardianRecord | null> {
+    const rec = await this.getById(id);
+    if (!rec) return null;
+    const threshold = patch.hfThreshold ?? rec.hfThreshold;
+    const target = patch.hfTarget ?? rec.hfTarget;
+    if (!(target > threshold)) return null;
+    rec.hfThreshold = threshold;
+    rec.hfTarget = target;
+    await this.save(rec);
+    return rec;
+  }
+
+  // ── Cursor + history (Redis, not in-memory) ────────────────────────────────
+
+  /** Last block the rescue-history indexer scanned for this wallet, or null. */
+  async getRescuesCursor(wallet: string): Promise<number | null> {
+    const raw = await this.redis.get(RESCUES_CURSOR(wallet)).catch(() => null);
+    return raw ? Number(raw) : null;
+  }
+
+  async setRescuesCursor(wallet: string, block: number): Promise<void> {
+    await this.redis.set(RESCUES_CURSOR(wallet), String(block)).catch(() => undefined);
+  }
+
+  /** Decoded rescue history for a wallet, newest first. */
+  async getRescues(wallet: string): Promise<unknown[]> {
+    const raw = await this.redis.lRange(RESCUES(wallet), 0, -1).catch(() => []);
+    const out: unknown[] = [];
+    for (const item of raw) {
+      try {
+        out.push(JSON.parse(item));
+      } catch {
+        /* skip a corrupt entry */
+      }
+    }
+    return out.reverse(); // Redis list is oldest-first; return newest-first
+  }
+
+  /** Append decoded rescues (newest first) to the wallet's capped history list. */
+  async appendRescues(wallet: string, events: unknown[]): Promise<void> {
+    if (events.length === 0) return;
+    // Prepend newest-first so the Redis list stays oldest-first; then trim.
+    for (const e of [...events].reverse()) {
+      await this.redis.lPush(RESCUES(wallet), JSON.stringify(e)).catch(() => undefined);
+    }
+    await this.redis.lTrim(RESCUES(wallet), 0, MAX_RESCUES - 1).catch(() => undefined);
+  }
+
+  /** Last block the event watcher processed (global), or null. */
+  async getWatcherCursor(): Promise<number | null> {
+    const raw = await this.redis.get(WATCHER_CURSOR).catch(() => null);
+    return raw ? Number(raw) : null;
+  }
+
+  async setWatcherCursor(block: number): Promise<void> {
+    await this.redis.set(WATCHER_CURSOR, String(block)).catch(() => undefined);
+  }
+
+  // ── Dirty flag (cache invalidation) ────────────────────────────────────────
+
+  /** Mark a record's status cache as stale (set by the rescue path). */
+  async setDirty(id: string): Promise<void> {
+    await this.redis.set(DIRTY(id), "1", { EX: 300 }).catch(() => undefined);
+  }
+
+  /** True if the dirty flag is set; clears it. Returns whether it was set. */
+  async checkAndClearDirty(id: string): Promise<boolean> {
+    const was = await this.redis.del(DIRTY(id)).catch(() => 0);
+    return was > 0;
+  }
+
+  // ── Telegram link codes ─────────────────────────────────────────────────────
+
+  /** Create a one-time, 5-minute link code → record id. Returns the code. */
+  async createLinkCode(recordId: string): Promise<string> {
+    const code = randomBytes(4).toString("hex"); // 8 hex chars
+    await this.redis.set(LINK_CODE(code), recordId, { EX: 300 }).catch(() => undefined);
+    return code;
+  }
+
+  /** Resolve a link code to a record id (consumes it). */
+  async consumeLinkCode(code: string): Promise<string | null> {
+    const id = await this.redis.getDel(LINK_CODE(code)).catch(() => null);
+    return id ?? null;
+  }
+
+  // ── HF snapshots (for the dashboard chart) ──────────────────────────────────
+
+  /** Append an HF reading to the record's capped time series. */
+  async appendHfSnapshot(id: string, hf: number | null, at = Date.now()): Promise<void> {
+    const pt = JSON.stringify({ t: at, hf });
+    await this.redis.lPush(HF_SNAPSHOTS(id), pt).catch(() => undefined);
+    await this.redis.lTrim(HF_SNAPSHOTS(id), 0, MAX_HF_SNAPSHOTS - 1).catch(() => undefined);
+  }
+
+  /** Recent HF readings, oldest-first (for the dashboard chart). */
+  async getHfSnapshots(id: string): Promise<Array<{ t: number; hf: number | null }>> {
+    const raw = await this.redis.lRange(HF_SNAPSHOTS(id), 0, -1).catch(() => []);
+    const out: Array<{ t: number; hf: number | null }> = [];
+    for (const item of raw) {
+      try {
+        out.push(JSON.parse(item));
+      } catch {
+        /* skip a corrupt entry */
+      }
+    }
+    return out.reverse(); // oldest-first
   }
 
   /**
