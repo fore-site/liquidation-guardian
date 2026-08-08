@@ -3,7 +3,7 @@
 # watch loop) in a single Node process.
 
 # ── Stage 1: install deps + typecheck + build the TanStack Start app ──────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Root deps first (better layer caching).
@@ -20,7 +20,7 @@ RUN npm run typecheck
 RUN npm ci --include=dev --prefix web && npm run build --prefix web
 
 # ── Stage 2: slim runtime ─────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
