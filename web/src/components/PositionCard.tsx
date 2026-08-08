@@ -19,7 +19,7 @@ export function PositionCard({ status }: { status: Status }) {
 
         <div className="flex justify-between border-t border-border pt-3 text-sm text-muted-foreground">
           <span>Liquidation threshold</span>
-          <span className="font-semibold text-foreground">{(liquidationThreshold * 100).toFixed(1)}%</span>
+          <span className="font-mono font-semibold text-foreground">{(liquidationThreshold * 100).toFixed(1)}%</span>
         </div>
 
         <AssetList title="Collateral" assets={status.collaterals} empty="No collateral supplied" />
@@ -40,7 +40,7 @@ function AssetList({ title, assets, empty }: { title: string; assets: Asset[]; e
           {assets.map((a) => (
             <li key={a.address} className="flex justify-between py-1.5 text-sm">
               <span className="font-semibold">{a.symbol}</span>
-              <span className="tabular-nums">
+              <span className="font-mono tabular-nums">
                 {fmt(a.tokensHuman)}
                 {a.priceUsd != null && (
                   <span className="text-muted-foreground"> · {usd(a.tokensHuman * a.priceUsd)}</span>
@@ -56,8 +56,8 @@ function AssetList({ title, assets, empty }: { title: string; assets: Asset[]; e
 
 function Total({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
-    <div className="rounded-xl bg-secondary/60 p-3">
-      <span className={`block text-lg font-bold tabular-nums ${tone}`}>{value}</span>
+    <div className="rounded-lg bg-secondary/40 p-3">
+      <span className={`block font-mono text-lg font-semibold tabular-nums ${tone}`}>{value}</span>
       <span className="block text-xs text-muted-foreground">{label}</span>
     </div>
   );

@@ -54,6 +54,7 @@ export interface SessionConfig {
   chainId: string;
   hfThreshold: number;
   hfTarget: number;
+  telegramConnected?: boolean;
   /** Telegram username the record is bound to, or null when not bound. */
   telegramUsername?: string | null;
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
@@ -7,17 +7,18 @@ import {
   getSession,
   getStatus,
   stopWatching,
-  type Rescue,
 } from "../api.js";
 import { HealthFactorHero } from "../components/HealthFactorHero.js";
 import { PositionCard } from "../components/PositionCard.js";
 import { RescueOptionsCard } from "../components/RescueOptionsCard.js";
 import { RescueHistory } from "../components/RescueHistory.js";
-import { HfHistoryChart } from "../components/HfHistoryChart.js";
 import { TelegramLink } from "../components/TelegramLink.js";
 import { Button } from "../components/ui/button.js";
 
 const REFRESH_MS = 15_000;
+const HfHistoryChart = lazy(() =>
+  import("../components/HfHistoryChart.js").then((module) => ({ default: module.HfHistoryChart })),
+);
 
 export const Route = createFileRoute("/dashboard")({
   component: App,
@@ -40,19 +41,28 @@ function App() {
     if (ready && !authed) void navigate({ to: "/onboard" });
   }, [ready, authed, navigate]);
 
-  if (!ready) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>;
-  if (!authed) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>;
+  if (!ready) return <ShellLoading />;
+  if (!authed) return <ShellLoading />;
   return <Dashboard session={session.data?.config} onDisconnect={() => void session.refetch()} />;
+}
+
+function ShellLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-secondary border-t-accent" />
+    </div>
+  );
 }
 
 function Dashboard({
   session,
   onDisconnect,
 }: {
-  session?: { telegramUsername?: string | null };
+  session?: { telegramConnected?: boolean; telegramUsername?: string | null };
   onDisconnect: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [confirmingStop, setConfirmingStop] = useState(false);
 
   const status = useQuery({
     queryKey: ["status"],
@@ -61,7 +71,7 @@ function Dashboard({
   });
   const rescues = useQuery({
     queryKey: ["rescues"],
-    queryFn: () => getRescues().catch(() => [] as Rescue[]),
+    queryFn: getRescues,
     refetchInterval: REFRESH_MS,
   });
 
@@ -81,60 +91,74 @@ function Dashboard({
     },
   });
 
-  function confirmStop() {
-    if (window.confirm("Stop watching and delete all stored data? You'll need to onboard again.")) {
-      stop.mutate();
-    }
-  }
-
   const s = status.data;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <nav className="flex items-center justify-between border-b border-border px-6 py-4">
+      <nav className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4">
         <a href="/" className="text-lg font-bold tracking-tight hover:text-primary">
           Liquidation<span className="text-primary">Guardian</span>
         </a>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => void status.refetch()} disabled={status.isFetching}>
-            {status.isFetching ? "Refreshing…" : "Refresh"}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <Button variant="ghost" size="sm" onClick={() => void status.refetch()} disabled={status.isFetching} aria-label="Refresh position">
+            <RefreshIcon spinning={status.isFetching} />
+            <span className="hidden sm:inline">{status.isFetching ? "Refreshing…" : "Refresh"}</span>
           </Button>
           <Button variant="outline" size="sm" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>
-            Log out
+            <LogOutIcon />
+            <span className="hidden sm:inline">Log out</span>
           </Button>
-          <Button variant="destructive" size="sm" onClick={confirmStop} disabled={stop.isPending}>
-            Stop watching
+          <Button variant="destructive" size="sm" onClick={() => setConfirmingStop(true)} disabled={stop.isPending || confirmingStop} aria-label="Stop watching">
+            <OctagonAlertIcon />
+            <span className="hidden sm:inline">Stop watching</span>
           </Button>
         </div>
       </nav>
 
       <main className="mx-auto max-w-5xl px-6 py-6">
+        {confirmingStop && (
+          <div role="alertdialog" aria-labelledby="stop-title" className="mb-4 flex flex-col gap-3 rounded-lg border border-risk/40 bg-risk/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p id="stop-title" className="font-semibold text-foreground">Delete this Guardian?</p>
+              <p className="text-sm text-muted-foreground">Monitoring stops and the stored KeeperHub credential is permanently removed.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setConfirmingStop(false)}>Cancel</Button>
+              <Button variant="destructive" size="sm" onClick={() => stop.mutate()} disabled={stop.isPending}>
+                {stop.isPending ? "Deleting…" : "Delete Guardian"}
+              </Button>
+            </div>
+          </div>
+        )}
         {status.isError && (
           <div className="mb-4 rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
-            {status.error instanceof Error ? status.error.message : "Failed to load"} — is the API
-            server running?
+            {status.error instanceof Error ? status.error.message : "Position data is temporarily unavailable."}
           </div>
         )}
 
         {status.isLoading ? (
-          <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-            Loading position…
-          </div>
+          <PositionSkeleton />
         ) : s ? (
           <>
             <HealthFactorHero status={s} />
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
               <PositionCard status={s} />
               <RescueOptionsCard status={s} />
             </div>
             <div className="mt-4">
-              <HfHistoryChart />
+              <Suspense fallback={<ChartPlaceholder />}>
+                <HfHistoryChart />
+              </Suspense>
             </div>
             <div className="mt-4">
-              <RescueHistory rescues={rescues.data ?? []} />
+              <RescueHistory
+                rescues={rescues.data ?? []}
+                error={rescues.isError}
+                onRetry={() => void rescues.refetch()}
+              />
             </div>
             <footer className="mt-6 flex justify-between text-xs text-muted-foreground">
-              <span>
+              <span className="font-mono">
                 {short(s.wallet)} · chain {s.chainId}
               </span>
               <span>updated {new Date(s.updatedAt).toLocaleTimeString()}</span>
@@ -144,10 +168,63 @@ function Dashboard({
 
         {/* Always visible — Telegram binding is independent of the position read. */}
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <TelegramLink boundUsername={session?.telegramUsername} onChanged={() => void onDisconnect()} />
+          <TelegramLink connected={session?.telegramConnected} boundUsername={session?.telegramUsername} onChanged={() => void onDisconnect()} />
         </div>
       </main>
     </div>
+  );
+}
+
+/** Skeleton shaped like the real layout (B9 loading state). */
+function PositionSkeleton() {
+  return (
+    <div className="space-y-4" aria-label="Loading position">
+      <div className="rounded-xl border border-border bg-card p-6">
+        <div className="h-3 w-24 animate-pulse rounded bg-secondary" />
+        <div className="mt-3 h-10 w-40 animate-pulse rounded bg-secondary" />
+        <div className="mt-5 h-2 w-full animate-pulse rounded bg-secondary/60" />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />
+        <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />
+      </div>
+    </div>
+  );
+}
+
+function ChartPlaceholder() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-6" aria-label="Loading health factor history">
+      <div className="h-4 w-44 animate-pulse rounded bg-secondary" />
+      <div className="mt-6 h-36 animate-pulse rounded-lg bg-secondary/60" />
+    </div>
+  );
+}
+
+function RefreshIcon({ spinning }: { spinning?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`size-4 ${spinning ? "animate-spin" : ""}`}>
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  );
+}
+function LogOutIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+function OctagonAlertIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4">
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+    </svg>
   );
 }
 

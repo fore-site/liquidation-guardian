@@ -46,13 +46,13 @@ function Option({ c }: { c: Candidate }) {
 
   return (
     <li
-      className={`rounded-xl border border-border bg-secondary/40 p-3 ${
+      className={`rounded-lg border border-border bg-secondary/40 p-3 ${
         !c.available ? "opacity-60" : ""
       }`}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="font-semibold">
-          {verb} {fmt(c.amountHuman)} {c.asset}
+          {verb} <span className="font-mono tabular-nums">{fmt(c.amountHuman)}</span> {c.asset}
         </span>
         <Badge variant={badgeVariant as "success" | "warning" | "outline"}>{badge}</Badge>
       </div>

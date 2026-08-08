@@ -5,16 +5,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/
 
 /**
  * Telegram connection card for the dashboard. Shows the bound status and lets the
- * user:
- *  - connect: generates a one-time code + builds a t.me deep link; tapping it
- *    opens the bot with /start link_<code>, which binds the chat to this record.
- *  - unbind: removes the Telegram binding (the dashboard keeps watching).
+ * user connect via a one-time deep link, or unbind.
  */
 export function TelegramLink({
   boundUsername,
+  connected = false,
   onChanged,
 }: {
   boundUsername?: string | null;
+  connected?: boolean;
   onChanged: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -34,7 +33,8 @@ export function TelegramLink({
     },
   });
 
-  const bound = boundUsername != null && boundUsername.length > 0;
+  const bound = connected || (boundUsername != null && boundUsername.length > 0);
+  const account = boundUsername ? `@${boundUsername}` : "your Telegram account";
   const deepLink =
     link.data?.code && link.data?.botUsername
       ? `https://t.me/${link.data.botUsername}?start=link_${link.data.code}`
@@ -46,7 +46,7 @@ export function TelegramLink({
         <CardTitle className="text-lg">Telegram alerts</CardTitle>
         <CardDescription>
           {bound
-            ? `Bound to @${boundUsername} — the bot pushes alerts and one-tap rescues here.`
+            ? `Connected to ${account}.`
             : "Get alerts + one-tap rescues in Telegram."}
         </CardDescription>
       </CardHeader>

@@ -2,11 +2,10 @@ import { useEffect, useState } from "react";
 import { openSession, resumeSession, type Credentials, type SessionConfig } from "../api.js";
 import { initTelegram, isInTelegram, telegramInitData } from "../telegram.js";
 import { Button } from "./ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card.js";
 import { Input } from "./ui/input.js";
 import { Label } from "./ui/label.js";
 import { Slider } from "./ui/slider.js";
-import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.js";
+import { cn } from "../lib/utils.js";
 
 /**
  * First-run screen. Collects the user's own KeeperHub key + wallet + risk levels,
@@ -21,16 +20,18 @@ import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.js";
  * `initData` so the server can bind the credential to the verified Telegram user.
  */
 export function Onboarding({ onConnected }: { onConnected?: (config: SessionConfig) => void }) {
+  const [mode, setMode] = useState<"connect" | "resume">("connect");
   const [apiKey, setApiKey] = useState("");
   const [wallet, setWallet] = useState("");
-  const [profile, setProfile] = useState<"conservative" | "efficient" | null>(null);
-  const [threshold, setThreshold] = useState(1.5);
+  const [profile, setProfile] = useState<"conservative" | "efficient">("conservative");
+  const [threshold, setThreshold] = useState(1.6);
   const [target, setTarget] = useState(2.0);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const inTelegram = isInTelegram();
   const [resumeWallet, setResumeWallet] = useState("");
   const [resumeBusy, setResumeBusy] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
 
   useEffect(() => {
     initTelegram();
@@ -48,10 +49,16 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
   }
 
   const targetFloor = Math.round((threshold + 0.1) * 100) / 100;
+
+  function go(config: SessionConfig) {
+    if (onConnected) onConnected(config);
+    else window.location.href = "/dashboard";
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    setError(null);
+    setConnectError(null);
     try {
       const creds: Credentials = {
         keeperHubApiKey: apiKey.trim(),
@@ -62,12 +69,9 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
         ...(inTelegram ? { initData: telegramInitData() } : {}),
       };
       const { config } = await openSession(creds);
-      if (config) {
-        if (onConnected) onConnected(config);
-        else window.location.href = "/dashboard";
-      }
+      if (config) go(config);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't connect");
+      setConnectError(err instanceof Error ? err.message : "Couldn't connect");
     } finally {
       setBusy(false);
     }
@@ -77,153 +81,202 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
   async function resume(e: React.FormEvent) {
     e.preventDefault();
     setResumeBusy(true);
-    setError(null);
+    setResumeError(null);
     try {
       const { config } = await resumeSession({
         wallet: resumeWallet.trim(),
         chainId: "11155111",
         ...(inTelegram ? { initData: telegramInitData() } : {}),
       });
-      if (config) {
-        if (onConnected) onConnected(config);
-        else window.location.href = "/dashboard";
-      }
+      if (config) go(config);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't find that wallet — connect it first.");
+      setResumeError(err instanceof Error ? err.message : "Couldn't find that wallet — connect it first.");
     } finally {
       setResumeBusy(false);
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
-      <Card className="w-full max-w-md bg-card">
-        <CardHeader>
-          <a href="/" className="mb-1 text-sm text-muted-foreground hover:text-foreground">
-            ← Back to home
-          </a>
-          <CardTitle className="text-2xl">Connect your position</CardTitle>
-          <CardDescription>
-            Your KeeperHub key goes straight to the server over HTTPS — never stored in the browser.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/* Resume a stored session — wallet only, no key re-entry. */}
-          <form onSubmit={resume} className="space-y-3">
-            <Label htmlFor="resume-wallet">Already connected? Resume monitoring</Label>
-            <div className="flex gap-2">
-              <Input
-                id="resume-wallet"
-                type="text"
-                placeholder="0x…"
-                value={resumeWallet}
-                onChange={(e) => setResumeWallet(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                required
-              />
-              <Button type="submit" variant="outline" disabled={resumeBusy}>
-                {resumeBusy ? "Checking…" : "Resume"}
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 text-foreground">
+      <a href="/" className="mb-6 text-sm text-muted-foreground hover:text-foreground">
+        ← Back to home
+      </a>
+
+      <div className="w-full max-w-md">
+        <h1 className="text-balance text-center text-3xl font-semibold tracking-tight">
+          Connect your position
+        </h1>
+        <p className="mx-auto mt-2 max-w-sm text-center text-sm text-muted-foreground">
+          Your KeeperHub key goes straight to the server over HTTPS. It never touches this browser again.
+        </p>
+
+        {/* Mode switch */}
+        <div className="mx-auto mt-6 grid grid-cols-2 gap-1 rounded-lg border border-border bg-secondary p-1">
+          {(["connect", "resume"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={cn(
+                "rounded-md py-1.5 text-sm font-medium transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+                mode === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {m === "connect" ? "New position" : "Resume monitoring"}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 rounded-xl border border-border bg-card p-6">
+          {mode === "resume" ? (
+            <form onSubmit={resume} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="resume-wallet">Wallet address</Label>
+                <Input
+                  id="resume-wallet"
+                  type="text"
+                  placeholder="0x…"
+                  value={resumeWallet}
+                  onChange={(e) => setResumeWallet(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  We look up the position you already connected and restore the dashboard. No key needed.
+                </p>
+              </div>
+              {resumeError && <p role="alert" className="text-sm text-risk">{resumeError}</p>}
+              <Button type="submit" className="w-full" disabled={resumeBusy}>
+                {resumeBusy ? "Checking…" : "Resume monitoring"}
               </Button>
-            </div>
-          </form>
-
-          <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            or connect a new position
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
-          <form onSubmit={submit} className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="kh">KeeperHub API key</Label>
-              <Input
-                id="kh"
-                type="password"
-                placeholder="kh_…"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                autoComplete="off"
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="wallet">Wallet address</Label>
-              <Input
-                id="wallet"
-                type="text"
-                placeholder="0x…"
-                value={wallet}
-                onChange={(e) => setWallet(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                required
-              />
-            </div>
-
-            <div className="space-y-3">
-              <Label>Defense profile</Label>
-              <Tabs
-                value={profile ?? undefined}
-                onValueChange={(v) => pickProfile(v as "conservative" | "efficient")}
-                className="w-full"
-              >
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="conservative">The Conservative</TabsTrigger>
-                  <TabsTrigger value="efficient">Capital Efficient</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-
-            <div className="space-y-4">
+            </form>
+          ) : (
+            <form onSubmit={submit} className="space-y-5">
               <div className="space-y-2">
-                <Label>
-                  Act below <span className="font-bold text-primary">{threshold.toFixed(2)}</span>
-                </Label>
-                <Slider
-                  min={1.05}
-                  max={2.5}
-                  step={0.05}
-                  value={[threshold]}
-                  onValueChange={([t]) => {
-                    setThreshold(t);
-                    if (target < t + 0.1) setTarget(Math.round((t + 0.5) * 100) / 100);
-                  }}
+                <Label htmlFor="kh">KeeperHub API key</Label>
+                <Input
+                  id="kh"
+                  type="password"
+                  placeholder="kh_…"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  autoComplete="off"
+                  required
                 />
               </div>
+
               <div className="space-y-2">
-                <Label>
-                  Restore to{" "}
-                  <span className="font-bold text-primary">{Math.max(target, targetFloor).toFixed(2)}</span>
-                </Label>
-                <Slider
-                  min={targetFloor}
-                  max={3}
-                  step={0.05}
-                  value={[Math.max(target, targetFloor)]}
-                  onValueChange={([t]) => setTarget(t)}
+                <Label htmlFor="wallet">Wallet address</Label>
+                <Input
+                  id="wallet"
+                  type="text"
+                  placeholder="0x…"
+                  value={wallet}
+                  onChange={(e) => setWallet(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  required
                 />
               </div>
-            </div>
 
-            {error && (
-              <div className="rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
-                {error}
+              <div className="space-y-3">
+                <Label id="profile-label">Defense profile</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <ProfileCard
+                    title="The Conservative"
+                    body="Act early, restore high"
+                    active={profile === "conservative"}
+                    onClick={() => pickProfile("conservative")}
+                  />
+                  <ProfileCard
+                    title="Capital Efficient"
+                    body="Ride the edge for yield"
+                    active={profile === "efficient"}
+                    onClick={() => pickProfile("efficient")}
+                  />
+                </div>
               </div>
-            )}
 
-            <Button type="submit" disabled={busy} className="w-full" size="lg">
-              {busy ? "Connecting…" : "Connect & watch"}
-            </Button>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>
+                    Act below <span className="font-mono font-semibold text-accent">{threshold.toFixed(2)}</span>
+                  </Label>
+                  <Slider
+                    aria-label="Act below health factor"
+                    min={1.05}
+                    max={2.5}
+                    step={0.05}
+                    value={[threshold]}
+                    onValueChange={([t]) => {
+                      setThreshold(t);
+                      if (target < t + 0.1) setTarget(Math.round((t + 0.5) * 100) / 100);
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>
+                    Restore to{" "}
+                    <span className="font-mono font-semibold text-accent">{Math.max(target, targetFloor).toFixed(2)}</span>
+                  </Label>
+                  <Slider
+                    aria-label="Restore health factor to"
+                    min={targetFloor}
+                    max={3}
+                    step={0.05}
+                    value={[Math.max(target, targetFloor)]}
+                    onValueChange={([t]) => setTarget(t)}
+                  />
+                </div>
+              </div>
 
-            <p className="text-center text-xs text-muted-foreground">
-              Rescues are executed by KeeperHub under the delegation you signed — this page never
-              asks you to connect or sign a wallet.
-            </p>
-          </form>
-        </CardContent>
-      </Card>
+              {connectError && (
+                <div role="alert" className="rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
+                  {connectError}
+                </div>
+              )}
+
+              <Button type="submit" disabled={busy} className="w-full" size="lg">
+                {busy ? "Connecting…" : "Connect & watch"}
+              </Button>
+
+              <p className="text-center text-xs text-muted-foreground">
+                Rescues are executed by KeeperHub under the delegation you signed. This page never asks you to connect or sign a wallet.
+              </p>
+            </form>
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function ProfileCard({
+  title,
+  body,
+  active,
+  onClick,
+}: {
+  title: string;
+  body: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "rounded-lg border p-3 text-left transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+        active
+          ? "border-primary bg-primary/10"
+          : "border-border bg-secondary/40 hover:border-input hover:bg-secondary",
+      )}
+    >
+      <span className="block text-sm font-semibold">{title}</span>
+      <span className="mt-0.5 block text-xs text-muted-foreground">{body}</span>
+    </button>
   );
 }

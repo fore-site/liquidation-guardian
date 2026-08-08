@@ -1,35 +1,36 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* 1inch-style near-black dark theme, purple accent */
-  --color-background: #0d0d0f;
+  /* Sentinel dark theme — pure black base, violet accent, hairline borders. */
+  --color-background: #000000;
   --color-foreground: #f5f5f7;
-  --color-card: #17171b;
+  --color-card: #181818;
   --color-card-foreground: #f5f5f7;
-  --color-popover: #1c1c21;
+  --color-popover: #1f1f1f;
   --color-popover-foreground: #f5f5f7;
-  --color-primary: #8b5cf6;
+  --color-primary: #7c5cfc;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #232329;
+  --color-secondary: #272727;
   --color-secondary-foreground: #e8e8ec;
   --color-muted: #8a8a93;
   --color-muted-foreground: #8a8a93;
-  --color-accent: #7c3aed;
+  --color-accent: #9d85ff;
   --color-accent-foreground: #ffffff;
   --color-destructive: #f85149;
-  --color-border: #26262c;
-  --color-input: #26262c;
-  --color-ring: #8b5cf6;
+  --color-border: #272727;
+  --color-input: #313131;
+  --color-ring: #7c5cfc;
 
   /* HF status colors */
   --color-healthy: #3fb950;
   --color-watch: #d29922;
   --color-risk: #f85149;
 
-  --radius-sm: 0.5rem;
-  --radius-md: 0.625rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
 }
@@ -38,16 +39,80 @@
   * {
     border-color: var(--color-border);
   }
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-primary) 35%, transparent);
+    color: var(--color-foreground);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 3px;
+  }
+  /* No orphaned words (landing-page-design B1). */
+  h1,
+  h2,
+  h3,
+  p {
+    text-wrap: pretty;
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Fluid motion — the only easing curve in the app (landing-page-design B7). */
+  .fluid {
+    transition-duration: 700ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .fluid-fast {
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  /* Hero heading gradient (dark theme): white → muted grey (B5). */
+  .hero-gradient {
+    background: linear-gradient(90deg, #ffffff 0%, #b5b5bd 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Glass surfaces for the floating island nav + overlays. */
+  .glass {
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+  .glass-heavy {
+    background: rgba(0, 0, 0, 0.86);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+  }
+  /* The vigil line glow. */
+  .vigil-glow {
+    box-shadow: 0 0 0 4px rgba(124, 92, 252, 0.18), 0 0 24px rgba(124, 92, 252, 0.45);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -62,6 +62,7 @@ export function publicRecord(r: GuardianRecord) {
     hfThreshold: r.hfThreshold,
     hfTarget: r.hfTarget,
     autoMode: r.autoMode,
+    telegramConnected: r.telegramUserId != null,
     telegramUsername: r.telegramUsername ?? null,
   };
 }

@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js";
  * server records on each /api/status build.
  */
 export function HfHistoryChart() {
-  const { data = [] } = useQuery({
+  const { data = [], isError, refetch } = useQuery({
     queryKey: ["hf-history"],
     queryFn: getHfHistory,
     refetchInterval: 15_000,
@@ -24,21 +24,26 @@ export function HfHistoryChart() {
         <CardTitle>Health factor over time</CardTitle>
       </CardHeader>
       <CardContent>
-        {points.length < 2 ? (
-          <p className="text-sm text-muted-foreground">
+        {isError ? (
+          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+            <span>History is temporarily unavailable.</span>
+            <button type="button" className="font-medium text-primary hover:underline" onClick={() => void refetch()}>Retry</button>
+          </div>
+        ) : points.length < 2 ? (
+          <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
             Not enough data yet — the chart fills in as the dashboard polls.
-          </p>
+          </div>
         ) : (
           <div className="h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={points} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
                 <defs>
                   <linearGradient id="hfFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#7c5cfc" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#7c5cfc" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="#26262c" strokeDasharray="3 3" vertical={false} />
+                <CartesianGrid stroke="#272727" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="t" stroke="#8a8a93" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis
                   stroke="#8a8a93"
@@ -49,14 +54,15 @@ export function HfHistoryChart() {
                 />
                 <Tooltip
                   contentStyle={{
-                    background: "#1c1c21",
-                    border: "1px solid #26262c",
+                    background: "#1f1f1f",
+                    border: "1px solid #272727",
                     borderRadius: 8,
                     fontSize: 12,
+                    fontFamily: "Geist, ui-sans-serif, system-ui",
                   }}
                   labelStyle={{ color: "#8a8a93" }}
                 />
-                <Area type="monotone" dataKey="hf" stroke="#8b5cf6" strokeWidth={2} fill="url(#hfFill)" />
+                <Area type="monotone" dataKey="hf" stroke="#7c5cfc" strokeWidth={2} fill="url(#hfFill)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
