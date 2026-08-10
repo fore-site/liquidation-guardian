@@ -6,7 +6,9 @@ import {
   getRescues,
   getSession,
   getStatus,
+  setPaused,
   stopWatching,
+  updateThresholds,
 } from "../api.js";
 import { HealthFactorHero } from "../components/HealthFactorHero.js";
 import { PositionCard } from "../components/PositionCard.js";
@@ -14,6 +16,8 @@ import { RescueOptionsCard } from "../components/RescueOptionsCard.js";
 import { RescueHistory } from "../components/RescueHistory.js";
 import { TelegramLink } from "../components/TelegramLink.js";
 import { Button } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
+import { Label } from "../components/ui/label.js";
 
 const REFRESH_MS = 15_000;
 const HfHistoryChart = lazy(() =>
@@ -58,11 +62,12 @@ function Dashboard({
   session,
   onDisconnect,
 }: {
-  session?: { telegramConnected?: boolean; telegramUsername?: string | null };
+  session?: { telegramConnected?: boolean; telegramUsername?: string | null; paused?: boolean; hfThreshold?: number; hfTarget?: number };
   onDisconnect: () => void;
 }) {
   const queryClient = useQueryClient();
   const [confirmingStop, setConfirmingStop] = useState(false);
+  const [editingThresholds, setEditingThresholds] = useState(false);
 
   const status = useQuery({
     queryKey: ["status"],
@@ -91,6 +96,33 @@ function Dashboard({
     },
   });
 
+  const pause = useMutation({
+    mutationFn: (paused: boolean) => setPaused(paused),
+    onSuccess: () => void sessionRefetch(),
+  });
+  const thresholds = useMutation({
+    mutationFn: (v: { t: number; g: number }) => updateThresholds(v.t, v.g),
+    onSuccess: () => {
+      void sessionRefetch();
+      setEditingThresholds(false);
+    },
+  });
+
+  // Local threshold editor state (init from the session config).
+  const [t, setT] = useState(session?.hfThreshold ?? 1.15);
+  const [g, setG] = useState(session?.hfTarget ?? 1.5);
+  useEffect(() => {
+    if (session?.hfThreshold != null) setT(session.hfThreshold);
+    if (session?.hfTarget != null) setG(session.hfTarget);
+  }, [session?.hfThreshold, session?.hfTarget]);
+
+  function sessionRefetch() {
+    void queryClient.invalidateQueries({ queryKey: ["session"] });
+    void queryClient.invalidateQueries({ queryKey: ["status"] });
+    onDisconnect();
+  }
+
+  const paused = session?.paused === true;
   const s = status.data;
 
   return (
@@ -100,6 +132,15 @@ function Dashboard({
           Liquidation<span className="text-primary">Guardian</span>
         </a>
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <Button
+            variant={paused ? "default" : "outline"}
+            size="sm"
+            onClick={() => pause.mutate(!paused)}
+            disabled={pause.isPending}
+            aria-label={paused ? "Resume watching" : "Pause watching"}
+          >
+            {paused ? "Resume" : "Pause"}
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => void status.refetch()} disabled={status.isFetching} aria-label="Refresh position">
             <RefreshIcon spinning={status.isFetching} />
             <span className="hidden sm:inline">{status.isFetching ? "Refreshing…" : "Refresh"}</span>
@@ -130,6 +171,13 @@ function Dashboard({
             </div>
           </div>
         )}
+
+        {paused && (
+          <div className="mb-4 rounded-lg border border-watch/40 bg-watch/10 p-3 text-sm text-watch">
+            The agent is paused. It is not watching this position.
+          </div>
+        )}
+
         {status.isError && (
           <div className="mb-4 rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
             {status.error instanceof Error ? status.error.message : "Position data is temporarily unavailable."}
@@ -141,6 +189,66 @@ function Dashboard({
         ) : s ? (
           <>
             <HealthFactorHero status={s} />
+
+            {/* Live threshold editor */}
+            <div className="mt-4 rounded-xl border border-border bg-card p-5">
+              {editingThresholds ? (
+                <form
+                  className="flex flex-wrap items-end gap-4"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    thresholds.mutate({ t: Number(t), g: Number(g) });
+                  }}
+                >
+                  <div className="space-y-2">
+                    <Label htmlFor="thr">Act below</Label>
+                    <Input
+                      id="thr"
+                      type="number"
+                      min={1.01}
+                      max={5}
+                      step={0.05}
+                      value={t}
+                      onChange={(e) => setT(Number(e.target.value))}
+                      className="w-28"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="trg">Restore to</Label>
+                    <Input
+                      id="trg"
+                      type="number"
+                      min={1.1}
+                      max={5}
+                      step={0.05}
+                      value={g}
+                      onChange={(e) => setG(Number(e.target.value))}
+                      className="w-28"
+                    />
+                  </div>
+                  <Button type="submit" size="sm" disabled={thresholds.isPending || !(Number(g) > Number(t))}>
+                    {thresholds.isPending ? "Saving…" : "Save"}
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEditingThresholds(false)}>
+                    Cancel
+                  </Button>
+                  {thresholds.isError && (
+                    <p className="text-sm text-risk">{thresholds.error instanceof Error ? thresholds.error.message : "Couldn't save"}</p>
+                  )}
+                </form>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    Act below <span className="font-mono font-semibold text-watch">{s.hfThreshold.toFixed(2)}</span>
+                    {" · "}restore to <span className="font-mono font-semibold text-healthy">{s.hfTarget.toFixed(2)}</span>
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => setEditingThresholds(true)}>
+                    Edit thresholds
+                  </Button>
+                </div>
+              )}
+            </div>
+
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <PositionCard status={s} />
               <RescueOptionsCard status={s} />

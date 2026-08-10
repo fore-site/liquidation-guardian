@@ -49,6 +49,8 @@ export interface GuardianRecord {
   telegramUsername?: string;
   /** When true, the watch loop executes rescues autonomously and just notifies. */
   autoMode: boolean;
+  /** When true, the agent is paused — the watcher skips this record entirely. */
+  paused?: boolean;
   createdAt: number;
   /** Last time we alerted/acted on this record, to de-dupe repeated ticks. */
   lastAlertAt?: number;
@@ -62,6 +64,7 @@ export function publicRecord(r: GuardianRecord) {
     hfThreshold: r.hfThreshold,
     hfTarget: r.hfTarget,
     autoMode: r.autoMode,
+    paused: r.paused === true,
     telegramConnected: r.telegramUserId != null,
     telegramUsername: r.telegramUsername ?? null,
   };
@@ -288,6 +291,15 @@ export class GuardianStore {
     if (!(target > threshold)) return null;
     rec.hfThreshold = threshold;
     rec.hfTarget = target;
+    await this.save(rec);
+    return rec;
+  }
+
+  /** Pause or resume the agent for a record (the watcher skips paused records). */
+  async setPaused(id: string, paused: boolean): Promise<GuardianRecord | null> {
+    const rec = await this.getById(id);
+    if (!rec) return null;
+    rec.paused = paused;
     await this.save(rec);
     return rec;
   }

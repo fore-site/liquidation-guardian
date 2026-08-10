@@ -54,6 +54,8 @@ export interface SessionConfig {
   chainId: string;
   hfThreshold: number;
   hfTarget: number;
+  /** When true, the agent is paused (not watching this position). */
+  paused?: boolean;
   telegramConnected?: boolean;
   /** Telegram username the record is bound to, or null when not bound. */
   telegramUsername?: string | null;
@@ -87,8 +89,10 @@ import {
   getTelegramLinkFn,
   openSessionFn,
   resumeSessionFn,
+  setPausedFn,
   stopWatchingFn,
   unbindTelegramFn,
+  updateThresholdsFn,
 } from "./server/api.js";
 
 /**
@@ -126,6 +130,14 @@ export const getTelegramLink = () =>
 
 /** Unbind Telegram from the record (dashboard keeps watching). Mirrors /logout. */
 export const unbindTelegram = () => unbindTelegramFn().then((r) => unwrap<SessionState>(r));
+
+/** Pause or resume the agent for this record. */
+export const setPaused = (paused: boolean) =>
+  setPausedFn({ data: { paused } }).then((r) => unwrap<SessionState>(r));
+
+/** Update the act-below threshold and restore target live. */
+export const updateThresholds = (hfThreshold: number, hfTarget: number) =>
+  updateThresholdsFn({ data: { hfThreshold, hfTarget } }).then((r) => unwrap<SessionState>(r));
 
 /**
  * Resume a stored session for a wallet that already onboarded (no key needed).

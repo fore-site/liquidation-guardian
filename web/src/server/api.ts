@@ -259,6 +259,61 @@ export const unbindTelegramFn = createServerFn({ method: "POST" })
     return record ? { authenticated: true, config: publicRecord(record) } : { authenticated: false };
   });
 
+// ── POST /api/session/pause ───────────────────────────────────────────────────
+// Pause or resume the agent for this record. While paused, both the scheduled
+// watch loop and the event-driven watcher skip the position entirely.
+
+export const setPausedFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .validator((d: unknown) => d as { paused: boolean })
+  .handler(async ({ data, context }) => {
+    const { getContext, ensureBooted } = await server();
+    await ensureBooted();
+    const { store } = getContext();
+    const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+    if (!sid) {
+      return new Response(JSON.stringify({ error: "Not connected." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const record = await store.setPaused(sid, data.paused === true);
+    cache.delete(`${sid}:status`);
+    if (record) void store.setDirty(sid).catch(() => undefined);
+    return record ? { authenticated: true, config: publicRecord(record) } : { authenticated: false };
+  });
+
+// ── POST /api/session/thresholds ───────────────────────────────────────────────
+// Update the act-below threshold and restore target live from the dashboard.
+
+export const updateThresholdsFn = createServerFn({ method: "POST" })
+  .middleware([sessionMiddleware])
+  .validator((d: unknown) => d as { hfThreshold: number; hfTarget: number })
+  .handler(async ({ data, context }) => {
+    const { getContext, ensureBooted } = await server();
+    await ensureBooted();
+    const { store } = getContext();
+    const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+    if (!sid) {
+      return new Response(JSON.stringify({ error: "Not connected." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const threshold = clampHf(Number(data.hfThreshold));
+    const target = clampHf(Number(data.hfTarget));
+    if (!(target > threshold)) {
+      return new Response(JSON.stringify({ error: "Restore target must be above the act-below threshold." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const record = await store.updateConfig(sid, { hfThreshold: threshold, hfTarget: target });
+    cache.delete(`${sid}:status`);
+    if (record) void store.setDirty(sid).catch(() => undefined);
+    return record ? { authenticated: true, config: publicRecord(record) } : { authenticated: false };
+  });
+
 // ── GET /api/status ───────────────────────────────────────────────────────────
 
 export const getStatusFn = createServerFn({ method: "GET" })

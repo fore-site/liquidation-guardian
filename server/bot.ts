@@ -407,6 +407,9 @@ export class GuardianBot {
    * the event-driven watcher — the only difference is *when* it's called.
    */
   async runCheck(record: GuardianRecord): Promise<void> {
+    // Paused: the agent is not watching this record right now. Skipped by both
+    // the scheduled watch loop and the event-driven watcher.
+    if (record.paused) return;
     const chatId = record.telegramChatId!;
     const kh = this.store.keeperHubFor(record);
     const pos = await kh.readAavePosition(record.chainId, record.wallet);
