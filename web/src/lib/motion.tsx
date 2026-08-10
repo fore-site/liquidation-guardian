@@ -32,7 +32,10 @@ export function useInView<T extends HTMLElement>(threshold = 0.2) {
   return { ref, inView };
 }
 
-/** Gentle heavy fade-up on scroll entry (B7): translate-y-16 blur → settle. */
+/**
+ * Gentle heavy fade-up on scroll entry (B7): translate-y-16 blur → settle.
+ * Enhanced with spring physics feel using transition timing and easing.
+ */
 export function Reveal({
   children,
   className,
@@ -50,8 +53,10 @@ export function Reveal({
       ref={ref as never}
       style={{ transitionDelay: `${delay}ms` }}
       className={cn(
-        "fluid will-change-transform",
-        inView ? "translate-y-0 opacity-100 blur-0" : "translate-y-16 opacity-0 blur-md",
+        "will-change-transform transition-transform duration-700",
+        inView 
+          ? "translate-y-0 opacity-100 blur-0 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]" 
+          : "translate-y-16 opacity-0 blur-md [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]",
         className,
       )}
     >
@@ -63,6 +68,7 @@ export function Reveal({
 /**
  * Word-by-word tagline reveal (B11): each word goes from ~30% opacity to full
  * color as the section crosses the trigger line, in reading order.
+ * Enhanced with spring physics feel.
  */
 export function TaglineReveal({ text, className }: { text: string; className?: string }) {
   const { ref, inView } = useInView<HTMLParagraphElement>(0.4);
@@ -77,10 +83,11 @@ export function TaglineReveal({ text, className }: { text: string; className?: s
         <span
           key={i}
           aria-hidden="true"
-          className="fluid inline-block"
+          className="fluid inline-block will-change-opacity transition-opacity duration-500"
           style={{
             opacity: inView ? 1 : 0.3,
             transitionDelay: `${i * 40}ms`,
+            transitionTimingFunction: inView ? "cubic-bezier(0.16,1,0.3,1)" : "cubic-bezier(0.16,1,0.3,1)",
           }}
         >
           {w}

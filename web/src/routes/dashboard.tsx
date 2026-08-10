@@ -18,10 +18,13 @@ import { TelegramLink } from "../components/TelegramLink.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
+import { Card } from "../components/ui/card.js";
 
 const REFRESH_MS = 15_000;
 const HfHistoryChart = lazy(() =>
-  import("../components/HfHistoryChart.js").then((module) => ({ default: module.HfHistoryChart })),
+  import("../components/HfHistoryChart.js").then((module) => ({
+    default: module.HfHistoryChart,
+  })),
 );
 
 export const Route = createFileRoute("/dashboard")({
@@ -53,7 +56,7 @@ function App() {
 function ShellLoading() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-secondary border-t-accent" />
+      <div className="h-8 w-8 animate-spin rounded-[2rem] p-1.5 bg-black/10 border border-white/5" />
     </div>
   );
 }
@@ -62,7 +65,13 @@ function Dashboard({
   session,
   onDisconnect,
 }: {
-  session?: { telegramConnected?: boolean; telegramUsername?: string | null; paused?: boolean; hfThreshold?: number; hfTarget?: number };
+  session?: {
+    telegramConnected?: boolean;
+    telegramUsername?: string | null;
+    paused?: boolean;
+    hfThreshold?: number;
+    hfTarget?: number;
+  };
   onDisconnect: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -98,8 +107,11 @@ function Dashboard({
 
   const pause = useMutation({
     mutationFn: (paused: boolean) => setPaused(paused),
-    onSuccess: () => void sessionRefetch(),
+    onSuccess: () => {
+      void sessionRefetch();
+    },
   });
+
   const thresholds = useMutation({
     mutationFn: (v: { t: number; g: number }) => updateThresholds(v.t, v.g),
     onSuccess: () => {
@@ -126,20 +138,26 @@ function Dashboard({
   const s = status.data;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <nav className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4">
+    <div className="min-h-screen bg-background text-foreground relative overflow-hidden">
+      {/* Noise overlay - fixed, pointer-events-none */}
+      <div className="noise-overlay" aria-hidden="true" />
+      <nav className="flex flex-wrap items-center justify-between gap-6 border-b border-border px-6 py-4 sm:px-8 sm:py-6">
         <a href="/" className="text-lg font-bold tracking-tight hover:text-primary">
           Liquidation<span className="text-primary">Guardian</span>
         </a>
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-3 sm:gap-4">
           <Button
             variant={paused ? "default" : "outline"}
             size="sm"
             onClick={() => pause.mutate(!paused)}
             disabled={pause.isPending}
             aria-label={paused ? "Resume watching" : "Pause watching"}
+            className="magneticIcon"
           >
             {paused ? "Resume" : "Pause"}
+            <svg className="h-4 w-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M12 5l-5 5h3v7h4v-7h3z" />
+            </svg>
           </Button>
           <Button variant="ghost" size="sm" onClick={() => void status.refetch()} disabled={status.isFetching} aria-label="Refresh position">
             <RefreshIcon spinning={status.isFetching} />
@@ -156,32 +174,36 @@ function Dashboard({
         </div>
       </nav>
 
-      <main className="mx-auto max-w-5xl px-6 py-6">
+      <main className="mx-auto max-w-[1440px] px-6 py-6">
         {confirmingStop && (
-          <div role="alertdialog" aria-labelledby="stop-title" className="mb-4 flex flex-col gap-3 rounded-lg border border-risk/40 bg-risk/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <Card className="mt-6">
             <div>
               <p id="stop-title" className="font-semibold text-foreground">Delete this Guardian?</p>
-              <p className="text-sm text-muted-foreground">Monitoring stops and the stored KeeperHub credential is permanently removed.</p>
+              <p className="text-sm text-muted-foreground">
+                Monitoring stops and the stored KeeperHub credential is permanently removed.
+              </p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setConfirmingStop(false)}>Cancel</Button>
+            <div className="flex gap-3 mt-4">
+              <Button variant="outline" size="sm" onClick={() => setConfirmingStop(false)}>
+                Cancel
+              </Button>
               <Button variant="destructive" size="sm" onClick={() => stop.mutate()} disabled={stop.isPending}>
                 {stop.isPending ? "Deleting…" : "Delete Guardian"}
               </Button>
             </div>
-          </div>
+          </Card>
         )}
 
         {paused && (
-          <div className="mb-4 rounded-lg border border-watch/40 bg-watch/10 p-3 text-sm text-watch">
+          <Card className="mt-6">
             The agent is paused. It is not watching this position.
-          </div>
+          </Card>
         )}
 
         {status.isError && (
-          <div className="mb-4 rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
+          <Card className="mt-6">
             {status.error instanceof Error ? status.error.message : "Position data is temporarily unavailable."}
-          </div>
+          </Card>
         )}
 
         {status.isLoading ? (
@@ -191,16 +213,16 @@ function Dashboard({
             <HealthFactorHero status={s} />
 
             {/* Live threshold editor */}
-            <div className="mt-4 rounded-xl border border-border bg-card p-5">
+            <Card className="mt-6">
               {editingThresholds ? (
                 <form
-                  className="flex flex-wrap items-end gap-4"
+                  className="flex flex-wrap items-end gap-6"
                   onSubmit={(e) => {
                     e.preventDefault();
                     thresholds.mutate({ t: Number(t), g: Number(g) });
                   }}
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <Label htmlFor="thr">Act below</Label>
                     <Input
                       id="thr"
@@ -213,7 +235,7 @@ function Dashboard({
                       className="w-28"
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <Label htmlFor="trg">Restore to</Label>
                     <Input
                       id="trg"
@@ -226,18 +248,29 @@ function Dashboard({
                       className="w-28"
                     />
                   </div>
-                  <Button type="submit" size="sm" disabled={thresholds.isPending || !(Number(g) > Number(t))}>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={thresholds.isPending || !(Number(g) > Number(t))}
+                  >
                     {thresholds.isPending ? "Saving…" : "Save"}
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setEditingThresholds(false)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setEditingThresholds(false)}
+                  >
                     Cancel
                   </Button>
                   {thresholds.isError && (
-                    <p className="text-sm text-risk">{thresholds.error instanceof Error ? thresholds.error.message : "Couldn't save"}</p>
+                    <p className="text-sm text-risk">
+                      {thresholds.error instanceof Error ? thresholds.error.message : "Couldn't save"}
+                    </p>
                   )}
                 </form>
               ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-6">
                   <p className="text-sm text-muted-foreground">
                     Act below <span className="font-mono font-semibold text-watch">{s.hfThreshold.toFixed(2)}</span>
                     {" · "}restore to <span className="font-mono font-semibold text-healthy">{s.hfTarget.toFixed(2)}</span>
@@ -247,23 +280,23 @@ function Dashboard({
                   </Button>
                 </div>
               )}
-            </div>
+            </Card>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <PositionCard status={s} />
-              <RescueOptionsCard status={s} />
+            <div className="mt-6 grid gap-6 md:grid-cols-2">
+              <Card>
+                <PositionCard status={s} />
+              </Card>
+              <Card>
+                <RescueOptionsCard status={s} />
+              </Card>
             </div>
-            <div className="mt-4">
+            <div className="mt-6">
               <Suspense fallback={<ChartPlaceholder />}>
                 <HfHistoryChart />
               </Suspense>
             </div>
-            <div className="mt-4">
-              <RescueHistory
-                rescues={rescues.data ?? []}
-                error={rescues.isError}
-                onRetry={() => void rescues.refetch()}
-              />
+            <div className="mt-6">
+              <RescueHistory rescues={rescues.data ?? []} error={rescues.isError} onRetry={() => void rescues.refetch()} />
             </div>
             <footer className="mt-6 flex justify-between text-xs text-muted-foreground">
               <span className="font-mono">
@@ -275,26 +308,32 @@ function Dashboard({
         ) : null}
 
         {/* Always visible — Telegram binding is independent of the position read. */}
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <TelegramLink connected={session?.telegramConnected} boundUsername={session?.telegramUsername} onChanged={() => void onDisconnect()} />
+        <div className="mt-6 grid gap-6 md:grid-cols-2">
+          <Card>
+            <TelegramLink connected={session?.telegramConnected} boundUsername={session?.telegramUsername} onChanged={() => void onDisconnect()} />
+          </Card>
         </div>
       </main>
     </div>
   );
 }
 
-/** Skeleton shaped like the real layout (B9 loading state). */
+/* ── Skeleton shaped like the real layout (B9 loading state). */
 function PositionSkeleton() {
   return (
-    <div className="space-y-4" aria-label="Loading position">
-      <div className="rounded-xl border border-border bg-card p-6">
-        <div className="h-3 w-24 animate-pulse rounded bg-secondary" />
-        <div className="mt-3 h-10 w-40 animate-pulse rounded bg-secondary" />
-        <div className="mt-5 h-2 w-full animate-pulse rounded bg-secondary/60" />
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />
-        <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />
+    <div className="space-y-5" aria-label="Loading position">
+      <Card>
+        <div className="h-3 w-28 animate-pulse rounded bg-secondary" />
+        <div className="mt-4 h-12 w-44 animate-pulse rounded bg-secondary" />
+        <div className="mt-5 h-3 w-full animate-pulse rounded bg-secondary/60" />
+      </Card>
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card className="h-[64px]">
+          <div className="h-3 w-28 animate-pulse rounded bg-secondary" />
+        </Card>
+        <Card className="h-[64px]">
+          <div className="h-3 w-28 animate-pulse rounded bg-secondary" />
+        </Card>
       </div>
     </div>
   );
@@ -302,7 +341,7 @@ function PositionSkeleton() {
 
 function ChartPlaceholder() {
   return (
-    <div className="rounded-xl border border-border bg-card p-6" aria-label="Loading health factor history">
+    <Card className="h-[100px]">
       <div className="h-4 w-44 animate-pulse rounded bg-secondary" />
       <div className="mt-6 h-36 animate-pulse rounded-lg bg-secondary/60" />
     </div>

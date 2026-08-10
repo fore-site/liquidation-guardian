@@ -1,16 +1,25 @@
 import * as React from "react";
 import { cn } from "~/lib/utils";
 
+/** Double-bezel card - outer shell with inner core for premium depth. */
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("rounded-xl border border-border bg-card text-card-foreground", className)}
+      className={cn("rounded-[2rem] p-1.5 bg-black/10 border border-white/5", className)}
       {...props}
     />
   ),
 );
 Card.displayName = "Card";
+
+/** Inner core - the actual content container. */
+const CardCore = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("rounded-[calc(2rem-0.375rem)] bg-card border border-border", className)} {...props} />
+  ),
+);
+CardCore.displayName = "CardCore";
 
 const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
@@ -47,4 +56,4 @@ const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 );
 CardFooter.displayName = "CardFooter";
 
-export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };
+export { Card, CardCore, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };

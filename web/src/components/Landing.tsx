@@ -72,7 +72,9 @@ const FAQS = [
 
 export function Landing() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground relative overflow-hidden">
+      {/* Noise overlay - fixed, pointer-events-none */}
+      <div className="noise-overlay" aria-hidden="true" />
       <IslandNav />
       <Hero />
       <Benefits />
@@ -91,7 +93,7 @@ function IslandNav() {
   const [open, setOpen] = useState(false);
   return (
     <div className="sticky top-0 z-40 px-4 pt-6">
-      <nav className="glass mx-auto flex w-max max-w-full items-center gap-8 rounded-full border border-border px-4 py-2">
+      <nav className="glass mx-auto flex w-max max-w-full items-center gap-8 rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
         <a href="/" className="px-2 text-sm font-semibold tracking-tight">
           Liquidation<span className="text-accent">Guardian</span>
         </a>
@@ -101,8 +103,12 @@ function IslandNav() {
           <NavLink href="#faq">FAQ</NavLink>
         </div>
         <div className="hidden md:block">
-          <Button asChild size="sm" className="rounded-full">
+          <Button asChild size="sm" className="rounded-full magneticIcon">
             <a href="/onboard">Get started</a>
+            {/* Magnetic trailing icon */}
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M12 5l-5 5h3v7h4v-7h3z" />
+            </svg>
           </Button>
         </div>
         <button
@@ -110,15 +116,15 @@ function IslandNav() {
           aria-label={open ? "Close menu" : "Open menu"}
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          className="relative flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-secondary md:hidden"
+          className="relative flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-secondary md:hidden"
         >
           <span
-            className={`absolute h-px w-4 bg-foreground transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+            className={`absolute h-[1px] w-4 bg-foreground transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
               open ? "rotate-45" : "-translate-y-[3px]"
             }`}
           />
           <span
-            className={`absolute h-px w-4 bg-foreground transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+            className={`absolute h-[1px] w-4 bg-foreground transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
               open ? "-rotate-45" : "translate-y-[3px]"
             }`}
           />
@@ -128,12 +134,18 @@ function IslandNav() {
       {/* Mobile glass overlay menu with staggered reveal */}
       {open && (
         <div className="glass-heavy fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 md:hidden">
-          {["How it works", "Calculator", "FAQ"].map((label, i) => (
+          {[
+            "How it works",
+            "Calculator",
+            "FAQ",
+          ].map((label, i) => (
             <a
               key={label}
               href={`#${label === "How it works" ? "how" : label === "Calculator" ? "calculator" : "faq"}`}
               onClick={() => setOpen(false)}
-              className={`fluid text-2xl font-semibold ${open ? "translate-y-0 opacity-100" : "translate-y-12 opacity-0"}`}
+              className={`fluid text-2xl font-semibold ${
+                open ? "translate-y-0 opacity-100" : "translate-y-12 opacity-0"
+              }`}
               style={{ transitionDelay: `${100 + i * 60}ms` }}
             >
               {label}
@@ -142,7 +154,9 @@ function IslandNav() {
           <Button
             asChild
             size="lg"
-            className={`fluid mt-4 rounded-full ${open ? "translate-y-0 opacity-100" : "translate-y-12 opacity-0"}`}
+            className={`fluid mt-4 rounded-full ${
+              open ? "translate-y-0 opacity-100" : "translate-y-12 opacity-0"
+            }`}
             style={{ transitionDelay: "340ms" }}
           >
             <a href="/onboard" onClick={() => setOpen(false)}>
@@ -166,31 +180,33 @@ function NavLink({ href, children }: { href: string; children: string }) {
 /* ── Hero ─────────────────────────────────────────────────────────────────── */
 function Hero() {
   return (
-    <section className="relative mx-auto max-w-5xl px-6 pb-24 pt-14 text-center sm:pt-20">
-      <Reveal>
-        <p className="mx-auto inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 font-mono text-xs uppercase tracking-widest text-muted-foreground">
+    <section className="relative mx-auto max-w-[1440px] px-6 pb-24 pt-14 text-center sm:pt-20">
+      <Reveal delay={40} className="stagger-1">
+        <p className="mx-auto inline-flex items-center gap-2 rounded-[2rem] p-1.5 bg-black/10 border border-white/5 px-3 py-1 font-mono text-xs uppercase tracking-widest text-muted-foreground">
           <span className="h-1.5 w-1.5 rounded-full bg-healthy" />
           Event watcher · LLM decides · KeeperHub executes
         </p>
       </Reveal>
 
-      <Reveal delay={80}>
-        <h1 className="hero-gradient mx-auto mt-6 max-w-[680px] text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
+      <Reveal delay={120} className="stagger-2">
+        <h1 className="hero-gradient mx-auto mt-6 max-w-[680px] text-balance text-[4.5rem] font-semibold leading-[1.05] tracking-tight sm:text-[5.5rem]">
           Never get liquidated while you sleep
         </h1>
       </Reveal>
 
-      <Reveal delay={160}>
+      <Reveal delay={200} className="stagger-3">
         <p className="mx-auto mt-6 max-w-[680px] text-lg text-muted-foreground">
-          Liquidation Guardian watches your Aave position, picks the cheapest fix before the
-          auction starts, and executes it onchain through KeeperHub. Simulated first, never blind.
+          Liquidation Guardian watches your Aave position, picks the cheapest fix before the auction starts, and executes it onchain through KeeperHub. Simulated first, never blind.
         </p>
       </Reveal>
 
-      <Reveal delay={240}>
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-          <Button asChild size="lg" className="rounded-full">
+      <Reveal delay={280} className="stagger-4">
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-6">
+          <Button asChild size="lg" className="rounded-full magneticIcon">
             <a href="/onboard">Get started</a>
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M12 5l-5 5h3v7h4v-7h3z" />
+            </svg>
           </Button>
           <Button asChild size="lg" variant="outline" className="rounded-full">
             <a href="#calculator">See the math</a>
@@ -199,8 +215,8 @@ function Hero() {
       </Reveal>
 
       {/* The vigil line — the product's own visual, live on the landing page. */}
-      <Reveal delay={320}>
-        <div className="mx-auto mt-16 max-w-2xl rounded-xl border border-border bg-card p-6 text-left">
+      <Reveal delay={360} className="stagger-5">
+        <div className="mx-auto mt-16 max-w-2xl rounded-[2rem] p-1.5 bg-black/10 border border-white/5 p-6 text-left">
           <p className="mb-4 text-xs uppercase tracking-widest text-muted-foreground">
             A position in danger, one rescue away
           </p>
@@ -214,20 +230,22 @@ function Hero() {
 /* ── Benefits ─────────────────────────────────────────────────────────────── */
 function Benefits() {
   return (
-    <section id="how" className="mx-auto max-w-5xl scroll-mt-28 px-6 py-16">
-      <Reveal>
+    <section id="how" className="mx-auto max-w-[1440px] scroll-mt-28 px-6 py-16">
+      <Reveal delay={40} className="stagger-1">
         <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Why it works</p>
         <h2 className="mt-3 max-w-[680px] text-3xl font-semibold tracking-tight sm:text-4xl">
           A guardian that reasons, not a bot that beeps
         </h2>
       </Reveal>
-      <div className="mt-10 grid gap-4 md:grid-cols-2">
+      <div className="mt-10 grid gap-6 md:grid-cols-2">
         {BENEFITS.map((b, i) => (
-          <Reveal key={b.title} delay={i * 60} as="li">
-            <article className="h-full rounded-xl border border-border bg-card p-6">
-              <h3 className="text-lg font-semibold">{b.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{b.body}</p>
-            </article>
+          <Reveal key={b.title} delay={i * 60 + 40} as="li" className={`stagger-${i + 2}`}>
+            <div className="rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
+              <div className="rounded-[calc(2rem-0.375rem)] bg-card border border-border p-6 h-full">
+                <h3 className="text-lg font-semibold">{b.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{b.body}</p>
+              </div>
+            </div>
           </Reveal>
         ))}
       </div>
@@ -238,21 +256,23 @@ function Benefits() {
 /* ── How it works ─────────────────────────────────────────────────────────── */
 function HowItWorks() {
   return (
-    <section className="mx-auto max-w-5xl px-6 py-16">
-      <Reveal>
+    <section className="mx-auto max-w-[1440px] px-6 py-16">
+      <Reveal delay={40} className="stagger-1">
         <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Setup</p>
         <h2 className="mt-3 max-w-[680px] text-3xl font-semibold tracking-tight sm:text-4xl">
           Three steps to a guarded position
         </h2>
       </Reveal>
-      <div className="mt-10 grid gap-4 md:grid-cols-3">
+      <div className="mt-10 grid gap-6 md:grid-cols-3">
         {STEPS.map((s, i) => (
-          <Reveal key={s.n} delay={i * 80} as="li">
-            <article className="h-full rounded-xl border border-border bg-card p-6">
-              <span className="font-mono text-sm text-accent">{s.n}</span>
-              <h3 className="mt-3 text-lg font-semibold">{s.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{s.body}</p>
-            </article>
+          <Reveal key={s.n} delay={i * 80 + 40} as="li" className={`stagger-${i + 2}`}>
+            <div className="rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
+              <div className="rounded-[calc(2rem-0.375rem)] bg-card border border-border p-6 h-full">
+                <span className="font-mono text-sm text-accent">{s.n}</span>
+                <h3 className="mt-3 text-lg font-semibold">{s.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+              </div>
+            </div>
           </Reveal>
         ))}
       </div>
@@ -263,10 +283,10 @@ function HowItWorks() {
 /* ── Tagline reveal (B11) ─────────────────────────────────────────────────── */
 function Tagline() {
   return (
-    <section className="mx-auto max-w-5xl px-6 py-24">
+    <section className="mx-auto max-w-[1440px] px-6 py-24">
       <TaglineReveal
         text="A liquidation happens in seconds. The Guardian never sleeps, so you can."
-        className="mx-auto max-w-[680px] text-center text-4xl font-semibold leading-tight tracking-tight sm:text-5xl"
+        className="mx-auto max-w-[680px] text-center text-4xl font-semibold leading-tight tracking-tight sm:text-5xl stagger-1"
       />
     </section>
   );
@@ -287,8 +307,8 @@ function RoiCalculator() {
   }, [borrowUsd, hf]);
 
   return (
-    <section id="calculator" className="mx-auto max-w-4xl scroll-mt-28 px-6 py-16">
-      <Reveal>
+    <section id="calculator" className="mx-auto max-w-[1440px] scroll-mt-28 px-6 py-16">
+      <Reveal delay={40} className="stagger-1">
         <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">The math</p>
         <h2 className="mt-3 max-w-[680px] text-3xl font-semibold tracking-tight sm:text-4xl">
           What does liquidation cost you?
@@ -298,63 +318,69 @@ function RoiCalculator() {
         </p>
       </Reveal>
 
-      <Reveal delay={100}>
-        <div className="mt-8 rounded-xl border border-border bg-card p-6">
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Asset">
-              <select
-                value={asset}
-                onChange={(e) => setAsset(e.target.value)}
-                className="h-10 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                {ASSETS.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Borrow amount ($)">
-              <input
-                type="number"
-                min={100}
-                step={500}
-                value={borrowUsd}
-                onChange={(e) => setBorrowUsd(Math.max(0, Number(e.target.value)))}
-                className="h-10 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </Field>
-            <Field label="Current health factor">
-              <input
-                type="number"
-                min={0.5}
-                max={2}
-                step={0.05}
-                value={hf}
-                onChange={(e) => setHf(Math.min(2, Math.max(0.5, Number(e.target.value))))}
-                className="h-10 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </Field>
-          </div>
+      <Reveal delay={100} className="stagger-2">
+        <div className="mt-8 rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
+          <div className="rounded-[calc(2rem-0.375rem)] bg-card border border-border p-6">
+            <div className="grid gap-6 md:grid-cols-3">
+              <Field label="Asset">
+                <select
+                  value={asset}
+                  onChange={(e) => setAsset(e.target.value)}
+                  className="h-11 w-full rounded-full border border-input bg-background px-4 py-2.5 font-mono text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 hover:border-primary/30"
+                >
+                  {ASSETS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Borrow amount ($)">
+                <input
+                  type="number"
+                  min={100}
+                  step={500}
+                  value={borrowUsd}
+                  onChange={(e) => setBorrowUsd(Math.max(0, Number(e.target.value)))}
+                  className="h-11 w-full rounded-full border border-input bg-background px-4 py-2.5 font-mono text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 hover:border-primary/30"
+                />
+              </Field>
+              <Field label="Current health factor">
+                <input
+                  type="number"
+                  min={0.5}
+                  max={2}
+                  step={0.05}
+                  value={hf}
+                  onChange={(e) => setHf(Math.min(2, Math.max(0.5, Number(e.target.value))))}
+                  className="h-11 w-full rounded-full border border-input bg-background px-4 py-2.5 font-mono text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 hover:border-primary/30"
+                />
+              </Field>
+            </div>
 
-          <div className="mt-6 space-y-3 rounded-lg bg-secondary/40 p-5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Risk level</span>
-              <span className={`font-semibold ${result.risk === "Liquidating" || result.risk === "High" ? "text-risk" : result.risk === "Elevated" ? "text-watch" : "text-healthy"}`}>
-                {result.risk}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Penalty if liquidated</span>
-              <span className="font-mono font-semibold text-foreground">${result.penalty.toFixed(0)}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Guardian's fix</span>
-              <span className="font-mono font-semibold text-foreground">${result.rescueCost.toFixed(0)}</span>
-            </div>
-            <div className="flex items-center justify-between border-t border-border pt-3">
-              <span className="text-sm font-semibold">You avoid</span>
-              <span className="font-mono text-lg font-semibold text-primary">${result.avoided.toFixed(0)}</span>
+            <div className="mt-6 space-y-4 rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
+              <div className="rounded-[calc(2rem-0.375rem)] bg-card border border-border p-5">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Risk level</span>
+                    <span className={`font-semibold ${result.risk === "Liquidating" || result.risk === "High" ? "text-risk" : result.risk === "Elevated" ? "text-watch" : "text-healthy"}`}>
+                      {result.risk}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Penalty if liquidated</span>
+                    <span className="font-mono font-semibold text-foreground">${result.penalty.toFixed(0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Guardian's fix</span>
+                    <span className="font-mono font-semibold text-foreground">${result.rescueCost.toFixed(0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-3">
+                    <span className="text-sm font-semibold">You avoid</span>
+                    <span className="font-mono text-lg font-semibold text-primary">${result.avoided.toFixed(0)}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -376,34 +402,38 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Faq() {
   const [open, setOpen] = useState<number | null>(0);
   return (
-    <section id="faq" className="mx-auto max-w-3xl scroll-mt-28 px-6 py-16">
-      <Reveal>
+    <section id="faq" className="mx-auto max-w-[1440px] scroll-mt-28 px-6 py-16">
+      <Reveal delay={40} className="stagger-1">
         <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">FAQ</p>
         <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Questions, answered</h2>
       </Reveal>
-      <div className="mt-8 divide-y divide-border rounded-xl border border-border bg-card">
-        {FAQS.map((f, i) => (
-          <div key={f.q}>
-            <button
-              type="button"
-              aria-expanded={open === i}
-              onClick={() => setOpen(open === i ? null : i)}
-              className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-sm font-medium transition-colors hover:bg-secondary/30"
-            >
-              {f.q}
-              <span
-                className={`shrink-0 font-mono text-muted-foreground transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
-                  open === i ? "rotate-45" : ""
-                }`}
+      <div className="mt-8 divide-y divide-border rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
+        <div className="rounded-[calc(2rem-0.375rem)] bg-card border border-border">
+          {FAQS.map((f, i) => (
+            <div key={f.q}>
+              <button
+                type="button"
+                aria-expanded={open === i}
+                onClick={() => setOpen(open === i ? null : i)}
+                className="flex w-full items-center justify-between gap-6 px-6 py-4 text-left text-sm font-medium transition-colors hover:bg-secondary/30"
               >
-                +
-              </span>
-            </button>
-            {open === i && (
-              <p className="px-5 pb-4 text-sm leading-relaxed text-muted-foreground">{f.a}</p>
-            )}
-          </div>
-        ))}
+                {f.q}
+                <span
+                  className={`shrink-0 font-mono text-muted-foreground transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                    open === i ? "rotate-45" : ""
+                  }`}
+                >
+                  +
+                </span>
+              </button>
+              {open === i && (
+                <p className="px-6 pb-4 text-sm leading-relaxed text-muted-foreground">
+                  {f.a}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -412,8 +442,8 @@ function Faq() {
 /* ── Final CTA + footer ───────────────────────────────────────────────────── */
 function FinalCta() {
   return (
-    <section className="mx-auto max-w-3xl px-6 py-24 text-center">
-      <Reveal>
+    <section className="mx-auto max-w-[1440px] px-6 py-24 text-center">
+      <Reveal delay={40} className="stagger-1">
         <h2 className="mx-auto max-w-[680px] text-4xl font-semibold tracking-tight sm:text-5xl">
           The auction starts at 1.0. Start before it does.
         </h2>
@@ -421,8 +451,11 @@ function FinalCta() {
           Connect your position in under a minute. No wallet signing, no keys in your browser.
         </p>
         <div className="mt-8">
-          <Button asChild size="lg" className="rounded-full">
+          <Button asChild size="lg" className="rounded-full magneticIcon">
             <a href="/onboard">Get started</a>
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M12 5l-5 5h3v7h4v-7h3z" />
+            </svg>
           </Button>
         </div>
       </Reveal>
@@ -433,7 +466,7 @@ function FinalCta() {
 function Footer() {
   return (
     <footer className="border-t border-border">
-      <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-muted-foreground sm:flex-row">
+      <div className="mx-auto max-w-[1440px] flex flex-col items-center justify-between gap-6 px-6 py-8 text-sm text-muted-foreground sm:flex-row">
         <span>
           Liquidation<span className="text-accent">Guardian</span>
         </span>

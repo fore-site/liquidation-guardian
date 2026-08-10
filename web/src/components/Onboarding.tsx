@@ -111,15 +111,18 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
         </p>
 
         {/* Mode switch */}
-        <div className="mx-auto mt-6 grid grid-cols-2 gap-1 rounded-lg border border-border bg-secondary p-1">
-          {(["connect", "resume"] as const).map((m) => (
+        <div className="mx-auto mt-6 grid grid-cols-2 gap-2 rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
+          {([
+            "connect",
+            "resume",
+          ] as const).map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => setMode(m)}
               className={cn(
-                "rounded-md py-1.5 text-sm font-medium transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-                mode === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                "rounded-[calc(2rem-0.375rem)] bg-card border border-border py-1.5 text-sm font-medium transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+                mode === m ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
               )}
             >
               {m === "connect" ? "New position" : "Resume monitoring"}
@@ -127,125 +130,136 @@ export function Onboarding({ onConnected }: { onConnected?: (config: SessionConf
           ))}
         </div>
 
-        <div className="mt-6 rounded-xl border border-border bg-card p-6">
-          {mode === "resume" ? (
-            <form onSubmit={resume} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="resume-wallet">Wallet address</Label>
-                <Input
-                  id="resume-wallet"
-                  type="text"
-                  placeholder="0x…"
-                  value={resumeWallet}
-                  onChange={(e) => setResumeWallet(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  We look up the position you already connected and restore the dashboard. No key needed.
+        <div className="mt-6 rounded-[2rem] p-1.5 bg-black/10 border border-white/5">
+          <div className="rounded-[calc(2rem-0.375rem)] bg-card border border-border p-6">
+            {mode === "resume" ? (
+              <form onSubmit={resume} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="resume-wallet">Wallet address</Label>
+                  <Input
+                    id="resume-wallet"
+                    type="text"
+                    placeholder="0x…"
+                    value={resumeWallet}
+                    onChange={(e) => setResumeWallet(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    We look up the position you already connected and restore the dashboard. No key needed.
+                  </p>
+                </div>
+                {resumeError && (
+                  <div role="alert" className="rounded-[calc(2rem-0.375rem)] p-3 bg-risk/10 text-sm text-risk">
+                    {resumeError}
+                  </div>
+                )}
+                <Button type="submit" className="w-full" disabled={resumeBusy}>
+                  {resumeBusy ? "Checking…" : "Resume monitoring"}
+                </Button>
+              </form>
+            ) : (
+              <form onSubmit={submit} className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="kh">KeeperHub API key</Label>
+                  <Input
+                    id="kh"
+                    type="password"
+                    placeholder="kh_…"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    autoComplete="off"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wallet">Wallet address</Label>
+                  <Input
+                    id="wallet"
+                    type="text"
+                    placeholder="0x…"
+                    value={wallet}
+                    onChange={(e) => setWallet(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label>Defense profile</Label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <ProfileCard
+                      title="The Conservative"
+                      body="Act early, restore high"
+                      active={profile === "conservative"}
+                      onClick={() => pickProfile("conservative")}
+                    />
+                    <ProfileCard
+                      title="Capital Efficient"
+                      body="Ride the edge for yield"
+                      active={profile === "efficient"}
+                      onClick={() => pickProfile("efficient")}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>
+                      Act below <span className="font-mono font-semibold text-accent">{threshold.toFixed(2)}</span>
+                    </Label>
+                  </div>
+                  <div className="space-y-2">
+                    <Slider
+                      aria-label="Act below health factor"
+                      min={1.05}
+                      max={2.5}
+                      step={0.05}
+                      value={[threshold]}
+                      onValueChange={([t]) => {
+                        setThreshold(t);
+                        if (target < t + 0.1) setTarget(Math.round((t + 0.5) * 100) / 100);
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>
+                      Restore to <span className="font-mono font-semibold text-accent">{Math.max(target, targetFloor).toFixed(2)}</span>
+                    </Label>
+                  </div>
+                  <div className="space-y-2">
+                    <Slider
+                      aria-label="Restore health factor to"
+                      min={targetFloor}
+                      max={3}
+                      step={0.05}
+                      value={[Math.max(target, targetFloor)]}
+                      onValueChange={([t]) => setTarget(t)}
+                    />
+                  </div>
+                </div>
+
+                {connectError && (
+                  <div role="alert" className="rounded-[calc(2rem-0.375rem)] p-3 bg-risk/10 text-sm text-risk">
+                    {connectError}
+                  </div>
+                )}
+
+                <Button type="submit" disabled={busy} className="w-full" size="lg">
+                  {busy ? "Connecting…" : "Connect & watch"}
+                </Button>
+
+                <p className="text-center text-xs text-muted-foreground">
+                  Rescues are executed by KeeperHub under the delegation you signed. This page never asks you to connect or sign a wallet.
                 </p>
-              </div>
-              {resumeError && <p role="alert" className="text-sm text-risk">{resumeError}</p>}
-              <Button type="submit" className="w-full" disabled={resumeBusy}>
-                {resumeBusy ? "Checking…" : "Resume monitoring"}
-              </Button>
-            </form>
-          ) : (
-            <form onSubmit={submit} className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="kh">KeeperHub API key</Label>
-                <Input
-                  id="kh"
-                  type="password"
-                  placeholder="kh_…"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  autoComplete="off"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="wallet">Wallet address</Label>
-                <Input
-                  id="wallet"
-                  type="text"
-                  placeholder="0x…"
-                  value={wallet}
-                  onChange={(e) => setWallet(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                  required
-                />
-              </div>
-
-              <div className="space-y-3">
-                <Label id="profile-label">Defense profile</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <ProfileCard
-                    title="The Conservative"
-                    body="Act early, restore high"
-                    active={profile === "conservative"}
-                    onClick={() => pickProfile("conservative")}
-                  />
-                  <ProfileCard
-                    title="Capital Efficient"
-                    body="Ride the edge for yield"
-                    active={profile === "efficient"}
-                    onClick={() => pickProfile("efficient")}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>
-                    Act below <span className="font-mono font-semibold text-accent">{threshold.toFixed(2)}</span>
-                  </Label>
-                  <Slider
-                    aria-label="Act below health factor"
-                    min={1.05}
-                    max={2.5}
-                    step={0.05}
-                    value={[threshold]}
-                    onValueChange={([t]) => {
-                      setThreshold(t);
-                      if (target < t + 0.1) setTarget(Math.round((t + 0.5) * 100) / 100);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>
-                    Restore to{" "}
-                    <span className="font-mono font-semibold text-accent">{Math.max(target, targetFloor).toFixed(2)}</span>
-                  </Label>
-                  <Slider
-                    aria-label="Restore health factor to"
-                    min={targetFloor}
-                    max={3}
-                    step={0.05}
-                    value={[Math.max(target, targetFloor)]}
-                    onValueChange={([t]) => setTarget(t)}
-                  />
-                </div>
-              </div>
-
-              {connectError && (
-                <div role="alert" className="rounded-lg border border-risk/40 bg-risk/10 p-3 text-sm text-risk">
-                  {connectError}
-                </div>
-              )}
-
-              <Button type="submit" disabled={busy} className="w-full" size="lg">
-                {busy ? "Connecting…" : "Connect & watch"}
-              </Button>
-
-              <p className="text-center text-xs text-muted-foreground">
-                Rescues are executed by KeeperHub under the delegation you signed. This page never asks you to connect or sign a wallet.
-              </p>
-            </form>
-          )}
+              </form>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -269,7 +283,7 @@ function ProfileCard({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "rounded-lg border p-3 text-left transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+        "rounded-[calc(2rem-0.375rem)] border p-3 text-left transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
         active
           ? "border-primary bg-primary/10"
           : "border-border bg-secondary/40 hover:border-input hover:bg-secondary",
