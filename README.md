@@ -297,8 +297,6 @@ docker compose up --build
    LLM_TIMEOUT_MS=60000 npm run kh -- rescue --transport mcp --json
    ```
 
-The full recording sequence is in [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
-
 ## Repository layout
 
 ```text
@@ -316,8 +314,6 @@ docs/            architecture, teardown, integration matrix, demo, and transacti
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — event watcher, decision layer, sizing, and execution safety
 - [`docs/RESCUE_TX.md`](docs/RESCUE_TX.md) — verified rescue transactions and onchain evidence
-- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — short step-by-step recording plan
-- [`docs/LIVE_DEMO_RUNBOOK.md`](docs/LIVE_DEMO_RUNBOOK.md) — thorough live end-to-end test and recording guide
 - [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) — KeeperHub surface matrix
 - [`docs/TEARDOWN.md`](docs/TEARDOWN.md) — what was tested, what failed, and why the architecture changed
 - [`docs/PITCH_DECK.md`](docs/PITCH_DECK.md) — concise product narrative
