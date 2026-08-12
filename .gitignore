@@ -30,6 +30,7 @@ web/.output/
 .commandcode/
 .claude/
 screenshots/
+docs/LIVE_DEMO_RUNBOOK.md
 
 # Playwright smoke-test artifacts
 .playwright-mcp/
