@@ -23,7 +23,7 @@
  *    cross-verified against live Sepolia logs (see docs/ARCHITECTURE.md).
  */
 import { SEPOLIA_POOL } from "../src/agent/assets.js";
-import { rpc, type RawLog } from "./rescues.js";
+import { decodeRescueLog, rpc, type RawLog, type RescueEvent } from "./rescues.js";
 import type { GuardianRecord, GuardianStore } from "./store.js";
 
 /** keccak256 of `Supply(address,address,address,uint256,uint16)`. */
@@ -191,7 +191,10 @@ export class EventWatcher {
   /**
    * Decode Repay + Supply events in [from, to] and append them to each stored
    * wallet's Redis history (the dashboard's /api/rescues reads this instead of
-   * scanning the chain). Best-effort: a decode/RPC failure just skips the window.
+   * scanning the chain). Indexed events carry the same full shape as the
+   * backfill path (asset symbol, human amount, tx hash + link) so the dashboard
+   * renders them identically. Best-effort: a decode/RPC failure just skips the
+   * window.
    */
   private async indexHistory(from: number, to: number): Promise<void> {
     const records = await this.store.all().catch(() => []);
@@ -201,17 +204,29 @@ export class EventWatcher {
       getPoolLogs([REPAY_TOPIC], from, to),
       getPoolLogs([SUPPLY_TOPIC], from, to),
     ]);
-    const byWallet = new Map<string, Array<{ type: "repay" | "supply"; block: number }>>();
+    const byWallet = new Map<string, RescueEvent[]>();
     for (const log of repays) {
+      // Repay indexes the position owner (user) at topic 2.
       const user = topicToAddress(log.topics[2]);
-      if (wallets.has(user)) push(byWallet, user, { type: "repay", block: parseInt(log.blockNumber, 16) });
+      if (wallets.has(user)) {
+        const decoded = decodeRescueLog(log, "repay");
+        if (decoded) push(byWallet, user, decoded);
+      }
     }
     for (const log of supplies) {
+      // Supply indexes reserve, onBehalfOf, referralCode (user is not indexed) —
+      // the position owner is onBehalfOf at topic 2.
       const onBehalf = topicToAddress(log.topics[2]);
-      if (wallets.has(onBehalf)) push(byWallet, onBehalf, { type: "supply", block: parseInt(log.blockNumber, 16) });
+      if (wallets.has(onBehalf)) {
+        const decoded = decodeRescueLog(log, "supply");
+        if (decoded) push(byWallet, onBehalf, decoded);
+      }
     }
     for (const [wallet, events] of byWallet) {
-      await this.store.appendRescues(wallet, events).catch(() => undefined);
+      // RPC logs arrive ascending, but appendRescues expects newest-first (its
+      // prepend leaves the newest event at the list head) — sort like the
+      // backfill path so the dashboard list stays newest-first.
+      await this.store.appendRescues(wallet, [...events].sort((a, b) => b.block - a.block)).catch(() => undefined);
     }
   }
 

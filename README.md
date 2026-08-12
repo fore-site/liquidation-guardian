@@ -67,9 +67,10 @@ const repays = candidates.filter((c) => c.action === "repay" && c.available && c
 
 **Trade-off:** this is less open-ended than a general tool-using agent, but it makes the safety boundary auditable. The model can choose poorly only within a closed set of executable, code-sized actions.
 
-## Simulate first, then execute
+## Simulate first, then execute — and verify after
 
-Every rescue passes through one execution boundary:
+Every rescue passes through one execution boundary, then waits for a **terminal
+settlement** and independently verifies the **onchain receipt + Aave event**:
 
 ```ts
 // src/agent/guardian.ts
@@ -79,12 +80,23 @@ if (!sim.success || sim.wouldRevert) {
 }
 
 if (opts.dryRun) {
-  return { status: "rescued", position, decision,
+  return { status: "dry_run", position, decision,
     detail: "dry-run: simulated only, not broadcast." };
 }
 
 const exec = await transport.executeAction(actionType, body);
+const settlement = await transport.waitForExecution(exec.executionId); // pending | confirmed | reverted | failed
+const txHash = txHashFrom(settlement);
+const verification = await verifyTransaction({ // receipt status + exact Repay/Supply event match
+  txHash, expected: { action, asset, user, amountUnits },
+});
 ```
+
+A broadcast is only reported as a success after **both** gates pass: KeeperHub reports a
+transaction, and our own public-RPC read of the receipt confirms status `1` with a
+`Repay`/`Supply` event whose reserve, user, and amount match exactly what we sized.
+Anything else surfaces as `broadcast_pending`, `transaction_reverted`, or
+`verification_failed` — never as a silent success.
 
 This protects the normal REST path and the MCP path. KeeperHub's hosted MCP protocol-action tool does not provide a reliable no-broadcast simulation envelope for this Aave action, so the MCP transport deliberately uses the existing REST client for simulation and MCP only for the real broadcast:
 
@@ -201,7 +213,7 @@ export async function safeAudit(
 | Project CLI | Used | Judgeable interface over the same engine. |
 | Application audit | Used | Lifecycle visibility in Redis, dashboard, and CLI. |
 | x402 / MPP | Not integrated | No paid transport in the safety-critical rescue path. |
-| Workflow builder | Not integrated | The event-driven watcher reacts faster than the earlier scheduled workflow experiment. |
+| Workflow builder | Read-only showcase | The event-driven watcher is the production trigger; `npm run workflow-showcase` lists and inspects Workflow Builder definitions without ever writing or executing one. |
 | KeeperHub native audit retrieval | Not claimed | The project shows its own audit plus onchain evidence. |
 
 See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for the complete matrix and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design.
@@ -241,6 +253,12 @@ The watcher polls Aave Pool logs for the events that can move a position:
 - ReserveDataUpdated
 
 It re-reads affected positions, throttles noisy price events, coalesces repeated reads, and hands the decision to the existing Guardian engine. The scheduled bot loop remains a backup rather than the primary trigger.
+
+The watcher persists its **block cursor in Redis** (`guardian:watcher-cursor`) on every
+poll, so a restart resumes exactly where it left off — no re-scan, no missed window.
+Rescues are serialized per wallet with a **Redis-backed rescue lock** (NX + TTL,
+owner-checked release), so a Telegram approval and the autonomous path can never run
+concurrently against the same position.
 
 **Trade-off:** this adds RPC cursor and event-indexing complexity, but it reacts to the chain rather than waiting for a coarse timer. The execution path stays shared, so event-driven, Telegram, and CLI triggers do not each implement their own rescue logic.
 
@@ -282,12 +300,12 @@ docker compose up --build
 
    ```bash
    npm install
-   npm run typecheck
-   npm run test-sizing
-   npm run test-security
-   npm run test-mcp
-   npm run test-audit
+   npm test
    ```
+
+   (`npm test` runs the deterministic regression gates: sizing math, security
+   primitives, MCP validation, audit redaction, execution-status classification,
+   rescue-lock semantics, and the TypeScript build check.)
 
 6. Run the demo:
 
@@ -295,6 +313,21 @@ docker compose up --build
    npm run setup-position
    LLM_TIMEOUT_MS=60000 npm run kh -- rescue --dry-run --transport mcp --json
    LLM_TIMEOUT_MS=60000 npm run kh -- rescue --transport mcp --json
+   ```
+
+7. Verify a rescue onchain, independently of KeeperHub's own reporting:
+
+   ```bash
+   npm run verify-demo -- --tx 0x… --action repay --asset LINK --amount <base-units>
+   npm run workflow-showcase   # read-only Workflow Builder surface
+   ```
+
+   Network-gated regression gates (run whenever you have connectivity):
+
+   ```bash
+   npm run test-verify-negative   # drifted expectations → verification_failed, live
+   npm run test-supply-live       # a real Aave Supply event verifies end-to-end
+   npm run test-rescue-lock-redis # rescue-lock semantics against a real Redis
    ```
 
 ## Repository layout

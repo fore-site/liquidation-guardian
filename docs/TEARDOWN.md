@@ -130,6 +130,10 @@ Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
 - **Proposed fix:** KeeperHub's execution-status response could include decoded emitted events
   (or effective transfers) so builders can confirm *what moved* without hand-rolling `eth_getLogs`.
   Ties back to the F3 fix — the recurring theme is "help me see what actually happened onchain."
+- **Where this landed in the project:** the manual `eth_getLogs` check became productized
+  verification — `src/transaction-verifier.ts` (receipt status + exact Aave `Repay`/`Supply` event
+  match) runs after every rescue, and `npm run verify-demo` reproduces it for any tx. Negative
+  cases are gated live by `npm run test-verify-negative` and `npm run test-supply-live`.
 
 ### [F10] KeeperHub's *named* Chainlink feed actions aren't all deployed per-chain
 - **Hit:** Adding multi-asset sizing, I needed USD prices. KeeperHub exposes named Chainlink
@@ -172,6 +176,9 @@ Format: **[F#] What I hit → Why it's confusing → Proposed fix.**
   point at the MCP/UI path. (b) Surface plan tiers in `list_action_schemas` (a `requiredPlan` field)
   so gating is visible before a write. (c) Document an executions-purge endpoint, or allow
   `DELETE ?force=true` to cascade.
+- **Where this landed in the project:** the Workflow Builder surface is still probed, but strictly
+  read-only — `npm run workflow-probe` lists the live tools and `npm run workflow-showcase`
+  lists/inspects definitions without ever creating, updating, executing, or deleting a workflow.
 
 <!-- Append new friction points below as they occur during the actual build. -->
 <!-- (F1–F11 recorded during the build.) -->

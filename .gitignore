@@ -29,8 +29,9 @@ web/.output/
 # Agent tooling state (session memory, settings, reference screenshots)
 .commandcode/
 .claude/
-screenshots/
 docs/LIVE_DEMO_RUNBOOK.md
+docs/WEB_APP_RUNBOOK.md
+docs/NARRATION_SCRIPT.md
 docs/DEMO_SCRIPT.md
 
 # Playwright smoke-test artifacts

@@ -21,6 +21,8 @@ import { KeeperHub, type AavePosition, type UserReserveData } from "../keeperhub
 import { createLogger } from "../log.js";
 import { RestExecutionTransport, type ExecutionTransport } from "../execution-transport.js";
 import { safeAudit, type AuditSink, type AuditSource } from "../audit.js";
+import { txHashFrom, verifyTransaction } from "../transaction-verifier.js";
+import type { SettlementStatus } from "../verification.js";
 import {
   type AssetPosition,
   type PositionSnapshot,
@@ -38,11 +40,15 @@ function log(msg: string): void {
 }
 
 export interface GuardianResult {
-  status: "healthy" | "rescued" | "simulation_failed" | "no_action";
+  status: "healthy" | "rescued" | "confirmed" | "partial" | "dry_run" | "simulation_failed" | "broadcast_failed" | "broadcast_pending" | "transaction_reverted" | "verification_failed" | "no_action";
   position: AavePosition;
   decision?: RescueDecision;
   transactionHash?: string;
   transactionLink?: string;
+  executionId?: string;
+  settlement?: SettlementStatus | "verification_failed";
+  gasUsed?: string;
+  gasCostWei?: string;
   detail?: string;
   provider?: "llm" | "deterministic";
 }
@@ -218,49 +224,40 @@ export async function executeRescue(opts: {
   await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "simulation", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, dryRun: opts.dryRun, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, wouldRevert: false, gasEstimate: sim.gasEstimate });
 
   if (opts.dryRun) {
-    return { status: "rescued", position, decision, detail: "dry-run: simulated only, not broadcast." };
+    return { status: "dry_run", position, decision, detail: "dry-run: simulated only, not broadcast." };
   }
 
-  // 7. Execute for real (fresh idempotency key inside executeAction).
+  // 7. Execute for real, then wait for a terminal KeeperHub result.
   log(`Broadcasting rescue via KeeperHub (${transport.name})…`);
   await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "broadcast", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString() });
   const exec = await transport.executeAction(actionType, body);
-  if (!exec.success) {
-    const detail = exec.error ?? "execution failed";
+  if (!exec.success || !exec.executionId) {
+    const detail = exec.error ?? "execution request failed";
     await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "failed", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: false, error: detail });
-    return { status: "simulation_failed", position, decision, detail };
+    return { status: "broadcast_failed", position, decision, detail };
   }
-  log(`✅ Rescued. tx: ${exec.transactionLink ?? exec.transactionHash}`);
-  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "broadcast", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, status: exec.status, executionId: exec.executionId, transactionHash: exec.transactionHash, transactionLink: exec.transactionLink });
-
-  // 8. Confirm the health factor actually recovered. The broadcast already
-  //    succeeded — a failed confirm read must NOT turn a successful rescue into a
-  //    reported failure; we surface the tx and note the confirm was skipped.
-  let after = position;
-  let confirmNote = "";
-  try {
-    after = await keeperHub.readAavePosition(chainId, user);
-    log(`Health factor after rescue: ${fmtHf(after.healthFactor)}`);
-  } catch (err) {
-    confirmNote = ` (post-rescue confirm read failed: ${err instanceof Error ? err.message : err})`;
-    logger.warn("post-rescue confirm read failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+  log(`Execution accepted: ${exec.executionId}`);
+  const settlement = await transport.waitForExecution(exec.executionId);
+  const txHash = txHashFrom(settlement);
+  if (settlement.status === "pending") {
+    return { status: "broadcast_pending", position, decision, executionId: exec.executionId, transactionHash: txHash, transactionLink: settlement.transactionLink ?? exec.transactionLink, settlement: "pending", detail: "Execution did not reach a terminal state before the timeout." };
   }
+  if (settlement.status !== "confirmed" || !txHash) {
+    const status = settlement.status === "reverted" ? "transaction_reverted" : "broadcast_failed";
+    return { status, position, decision, executionId: exec.executionId, transactionHash: txHash, transactionLink: settlement.transactionLink ?? exec.transactionLink, settlement: settlement.status, detail: settlement.error ?? "KeeperHub execution did not complete successfully." };
+  }
+  const verification = await verifyTransaction({ txHash, expected: { action: decision.action, asset: decision.assetAddress, user, amountUnits: decision.amountUnits } });
+  if (verification.status !== "confirmed") {
+    return { status: verification.status === "reverted" ? "transaction_reverted" : verification.status === "pending" ? "broadcast_pending" : "verification_failed", position, decision, executionId: exec.executionId, transactionHash: txHash, transactionLink: settlement.transactionLink ?? exec.transactionLink, settlement: verification.status, gasUsed: verification.receipt?.gasUsed.toString(), gasCostWei: verification.gasCostWei, detail: verification.reason ?? "Transaction verification failed." };
+  }
+  log(`✅ Confirmed. tx: ${settlement.transactionLink ?? txHash}`);
+  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "broadcast", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, status: settlement.status, executionId: exec.executionId, transactionHash: txHash, transactionLink: settlement.transactionLink ?? exec.transactionLink, gasEstimate: sim.gasEstimate });
 
-  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "confirmation", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, healthFactorAfter: after.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, status: "confirmed", executionId: exec.executionId, transactionHash: exec.transactionHash, transactionLink: exec.transactionLink, error: confirmNote || undefined });
-  return {
-    status: "rescued",
-    position: after,
-    decision,
-    transactionHash: exec.transactionHash,
-    transactionLink: exec.transactionLink,
-    detail: confirmNote || undefined,
-  };
-}
-
-function fmtHf(hf: number): string {
-  return Number.isFinite(hf) ? hf.toFixed(4) : "∞ (no debt)";
+  // 8. Confirm the position after the receipt and expected Aave event are verified.
+  const after = await keeperHub.readAavePosition(chainId, user).catch(() => position);
+  const finalStatus = opts.audit?.target != null && after.healthFactor < opts.audit.target ? "partial" : "confirmed";
+  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "confirmation", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, healthFactorAfter: after.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, status: finalStatus, executionId: exec.executionId, transactionHash: txHash, transactionLink: settlement.transactionLink ?? exec.transactionLink, error: undefined });
+  return { status: finalStatus, position: after, decision, executionId: exec.executionId, transactionHash: txHash, transactionLink: settlement.transactionLink ?? exec.transactionLink, settlement: "confirmed", gasUsed: verification.receipt?.gasUsed.toString(), gasCostWei: verification.gasCostWei };
 }
 
 /**

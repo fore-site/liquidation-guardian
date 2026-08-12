@@ -14,7 +14,7 @@
 | Surface | Status | Reason |
 |---|---|---|
 | x402 / MPP | Not integrated | No paid transport is placed in the safety-critical rescue path. |
-| Workflow builder | Not integrated | The project uses an event-driven Aave log watcher instead of a scheduled workflow. |
+| Workflow builder | Read-only showcase | The event-driven Aave log watcher is the production trigger; `npm run workflow-showcase` lists and inspects Workflow Builder definitions through the MCP read tools (`list_workflows`, `get_workflow`) and never creates, updates, executes, or deletes a workflow. |
 | KeeperHub native audit retrieval | Not claimed | The dashboard shows this application's redacted lifecycle audit plus onchain rescue history. |
 
 ## MCP transport
@@ -23,6 +23,8 @@ The MCP path uses `https://app.keeperhub.com/mcp` with the organization API key 
 
 ```bash
 npm run mcp-probe
+npm run workflow-probe        # read-only: which Workflow Builder tools the endpoint exposes
+npm run workflow-showcase     # read-only: list workflows / inspect one definition
 npm run kh -- position
 npm run kh -- candidates
 npm run kh -- rescue --dry-run --transport mcp

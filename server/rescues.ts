@@ -98,11 +98,11 @@ export async function getRescues(
 
   const events: RescueEvent[] = [];
   for (const log of repays) {
-    const e = decodeLog(log, "repay");
+    const e = decodeRescueLog(log, "repay");
     if (e) events.push(e);
   }
   for (const log of supplies) {
-    const e = decodeLog(log, "supply");
+    const e = decodeRescueLog(log, "supply");
     if (e) events.push(e);
   }
   events.sort((a, b) => b.block - a.block);
@@ -153,8 +153,12 @@ async function getLogs(
   return out;
 }
 
-/** Decode one log into a RescueEvent, or null if the reserve is unknown to us. */
-function decodeLog(log: RawLog, type: "repay" | "supply"): RescueEvent | null {
+/**
+ * Decode one Pool log into a RescueEvent, or null if the reserve is unknown to
+ * us. Exported so the event watcher indexes the same full shape the backfill
+ * stores (asset symbol, human amount, tx hash + link).
+ */
+export function decodeRescueLog(log: RawLog, type: "repay" | "supply"): RescueEvent | null {
   const reserveAddr = topicToAddress(log.topics[1]);
   const reserve = RESERVE_BY_ADDRESS[reserveAddr];
   if (!reserve) return null;

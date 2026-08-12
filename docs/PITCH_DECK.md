@@ -18,8 +18,9 @@ total cost** (tokens spent + gas), with reasoning you can audit.
 
 - Honest claim: it weighs the *cost of each fix*, not rigidity. Volatility
   forecasting is a roadmap item, not a live claim.
-- Demo hook: `npm run guardian -- --dry-run` shows the `Decision:` line with the
-  model's reasoning — and now the per-lever gas estimate.
+- Demo hook: `npm run kh -- rescue --dry-run --transport mcp --json` shows the
+  provider, the model's reasoning, and the clean no-broadcast simulation — with the
+  per-lever gas estimate.
 
 ## Pillar 2 — One-Click Strategy Blueprints (40s)
 
@@ -55,11 +56,14 @@ Consumers buy when they see the exact numbers.
 
 ## Closing (20s) — why it matters
 
-- **Executes onchain via KeeperHub** — the real rescue tx link
-  (`0x5683f7fb…`), verified via `eth_getLogs`.
+- **Executes onchain via KeeperHub** — the latest verified rescue tx
+  ([`0x3b056fd6…`](https://sepolia.etherscan.io/tx/0x3b056fd69281dfdc4413094684983604046b66902f77cfe88e8d5da960aa88b9)),
+  confirmed by our own verifier (`npm run verify-demo`): receipt status 1 **and** an
+  exact Aave `Repay` event match — not just the API saying success.
 - **Use of KeeperHub surfaces** — protocol plugins, simulate-first, audit
   trail, gas sponsorship, execution.
-- **Reliability & observability** — event-driven watcher + bot watch-loop
-  backup + simulate-first + retries + audit trail.
+- **Reliability & observability** — event-driven watcher (durable Redis cursor) +
+  bot watch-loop backup + simulate-first + terminal settlement + per-wallet rescue
+  locks + audit trail.
 - **Originality** — "the LLM is reserved for the judgment call, never trusted
   with arithmetic"; the cost-aware decision is the differentiator.

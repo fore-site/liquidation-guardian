@@ -86,6 +86,7 @@ const DIRTY = (id: string) => `guardian:dirty:${id}`;
 const LINK_CODE = (code: string) => `guardian:link:${code.toLowerCase()}`;
 const HF_SNAPSHOTS = (id: string) => `guardian:hf:${id}`;
 const AUDIT = (wallet: string) => `guardian:audit:${wallet.toLowerCase()}`;
+const RESCUE_LOCK = (chainId: string, wallet: string) => `guardian:rescue-lock:${chainId}:${wallet.toLowerCase()}`;
 /** Cap on stored decoded rescues per wallet (oldest dropped). */
 const MAX_RESCUES = 100;
 /** Cap on stored HF snapshots per record (oldest dropped). */
@@ -265,6 +266,26 @@ export class GuardianStore {
     this.clients.delete(id);
   }
 
+  /**
+   * Acquire the per-position rescue lock (NX + TTL). The default TTL is long
+   * enough to cover the whole critical section — broadcast, terminal-settlement
+   * wait (60–90s), onchain verification (90s), and the post-rescue position read —
+   * so the lock can't expire while a rescue is still running and let a second one
+   * in. The cost is a longer stale-lock window after a crash without release,
+   * which is the safer trade for money-moving rescues.
+   */
+  async acquireRescueLock(chainId: string, wallet: string, owner: string, ttlMs = 300_000): Promise<boolean> {
+    const result = await this.redis.set(RESCUE_LOCK(chainId, wallet), owner, { NX: true, PX: ttlMs }).catch(() => null);
+    return result === "OK";
+  }
+
+  async releaseRescueLock(chainId: string, wallet: string, owner: string): Promise<void> {
+    await this.redis.eval(
+      "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+      { keys: [RESCUE_LOCK(chainId, wallet)], arguments: [owner] },
+    ).catch(() => undefined);
+  }
+
   /** Convenience mutators the bot uses; each re-saves + returns the updated record. */
   async setAutoMode(id: string, autoMode: boolean): Promise<GuardianRecord | null> {
     const rec = await this.getById(id);
@@ -329,13 +350,16 @@ export class GuardianStore {
         /* skip a corrupt entry */
       }
     }
-    return out.reverse(); // Redis list is oldest-first; return newest-first
+    // appendRescues keeps the list newest-first (head = newest) — return as-is.
+    return out;
   }
 
   /** Append decoded rescues (newest first) to the wallet's capped history list. */
   async appendRescues(wallet: string, events: unknown[]): Promise<void> {
     if (events.length === 0) return;
-    // Prepend newest-first so the Redis list stays oldest-first; then trim.
+    // `events` is newest-first; pushing in reverse order leaves the NEWEST event
+    // at the list head, so the list stays newest-first and getRescues returns it
+    // as-is. Then trim the cap.
     for (const e of [...events].reverse()) {
       await this.redis.lPush(RESCUES(wallet), JSON.stringify(e)).catch(() => undefined);
     }

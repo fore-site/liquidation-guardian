@@ -328,6 +328,11 @@ export class GuardianBot {
     // be mistaken for a rescue failure, so isolate it from the real work.
     await this.tg.editMessageText(chatId, messageId, `⏳ Executing ${action} ${asset}…`).catch(() => undefined);
 
+    const lockOwner = `telegram:${userId}:${Date.now()}`;
+    if (!(await this.store.acquireRescueLock(record.chainId, record.wallet, lockOwner))) {
+      await this.tg.editMessageText(chatId, messageId, "A rescue is already running for this position.").catch(() => undefined);
+      return;
+    }
     try {
       // Re-read + re-size at approval time so we never act on a stale amount.
       const kh = this.store.keeperHubFor(record);
@@ -369,6 +374,8 @@ export class GuardianBot {
         messageId,
         `❌ Rescue failed: ${e instanceof Error ? e.message : e}`,
       );
+    } finally {
+      await this.store.releaseRescueLock(record.chainId, record.wallet, lockOwner);
     }
   }
 
@@ -436,6 +443,8 @@ export class GuardianBot {
         console.log(`[bot] rescue cap hit for ${short(record.wallet)} — skipping this tick (retry in ${cap.retryAfterSec}s).`);
         return;
       }
+      const lockOwner = `auto:${record.id}:${Date.now()}`;
+      if (!(await this.store.acquireRescueLock(record.chainId, record.wallet, lockOwner))) return;
       let result;
       try {
         result = await runAgenticRescue({
@@ -459,6 +468,8 @@ export class GuardianBot {
           )
           .catch(() => undefined);
         return;
+      } finally {
+        await this.store.releaseRescueLock(record.chainId, record.wallet, lockOwner);
       }
       // Only after a completed pass (any outcome) do we de-dupe the next tick.
       await this.store.markAlerted(record.id);
@@ -547,20 +558,32 @@ export class GuardianBot {
     const hf = Number.isFinite(result.position.healthFactor)
       ? result.position.healthFactor.toFixed(4)
       : "∞";
+    const what = result.decision
+      ? `${result.decision.action} ${fmt(result.decision.amountHuman)} ${result.decision.asset}`
+      : chosen
+        ? `${chosen.action} ${fmt(chosen.amountHuman)} ${chosen.asset.symbol}`
+        : "rescue";
+    const link = result.transactionLink ?? result.transactionHash;
     switch (result.status) {
-      case "rescued": {
-        const what = result.decision
-          ? `${result.decision.action} ${fmt(result.decision.amountHuman)} ${result.decision.asset}`
-          : chosen
-            ? `${chosen.action} ${fmt(chosen.amountHuman)} ${chosen.asset.symbol}`
-            : "rescue";
-        const link = result.transactionLink ?? result.transactionHash;
-        return `✅ ${cap(what)} done. Health factor now ${hf}.${link ? `\n${link}` : ""}`;
-      }
+      case "rescued":
+      case "confirmed":
+        return `✅ ${cap(what)} confirmed onchain. Health factor now ${hf}.${link ? `\n${link}` : ""}`;
+      case "partial":
+        return `⚠️ ${cap(what)} confirmed, but health factor (${hf}) is still below target — I'll keep watching.${link ? `\n${link}` : ""}`;
       case "healthy":
         return `✅ Position healthy (HF ${hf}). No action needed.`;
+      case "dry_run":
+        return `🧪 Dry-run: ${cap(what)} simulated clean, not broadcast.`;
       case "simulation_failed":
-        return `❌ Simulation/execution failed: ${result.detail ?? "unknown error"}`;
+        return `❌ Simulation failed: ${result.detail ?? "unknown error"}`;
+      case "broadcast_failed":
+        return `❌ Broadcast failed: ${result.detail ?? "KeeperHub did not accept the execution."}`;
+      case "broadcast_pending":
+        return `⏳ ${cap(what)} broadcast — onchain confirmation hasn't landed yet.${link ? `\n${link}` : ""} I'll keep watching.`;
+      case "transaction_reverted":
+        return `❌ ${cap(what)} reverted onchain — no position change.${link ? `\n${link}` : ""}`;
+      case "verification_failed":
+        return `⚠️ ${cap(what)} mined, but the onchain event didn't match what we expected: ${result.detail ?? "unknown"}.${link ? `\n${link}` : ""}`;
       case "no_action":
         return `ℹ️ No action: ${result.detail ?? "nothing to do"}.`;
       default:

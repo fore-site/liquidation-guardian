@@ -163,11 +163,34 @@ provider-rotating client (`server/rescues.ts`) that fails over between RPC endpo
 flaky provider for 60s, and paces in-flight requests — so a single flaky public node can't stall
 the watch.
 
-## Execution safety: simulate before broadcast
+## Execution safety: simulate, broadcast, settle, verify
 
 Every write goes through KeeperHub's `simulate: true` preflight first. Only if the result is
 `success: true` and `wouldRevert: false` do we re-issue the call for real, with a unique
-`idempotency_key`, then poll `get_direct_execution_status`.
+`idempotency_key`. A rescue is only reported as a success after **two** independent gates:
+
+1. **Terminal settlement** — the transport (`rest` or `mcp`) polls the execution until
+   `confirmed`, `reverted`, or `failed` (`src/verification.ts` normalizes both backends' status
+   vocabulary; a timeout surfaces as `broadcast_pending`, never as a silent success).
+2. **Onchain verification** — `src/transaction-verifier.ts` reads the transaction **receipt via
+   the public RPC** (`server/rescues.ts` provider-rotating client), asserts receipt status `1`,
+   and decodes the Aave `Repay`/`Supply` event from the Pool logs, matching the reserve, user,
+   and exact base-unit amount we sized. A mismatch returns `verification_failed` with the reason.
+
+This is what makes the demo independently verifiable (`npm run verify-demo`): the receipt and
+event proof are reproduced from the chain, not from KeeperHub's status field. The gas cost is
+computed as `gasUsed × effectiveGasPrice` in bigint and surfaced on the result.
+
+## Durable watcher recovery + per-wallet rescue locking
+
+The watcher persists its **block cursor in Redis** (`guardian:watcher-cursor`) after every poll
+and resumes from it on restart — a redeploy re-scans nothing and misses no window. The rescue
+path is serialized per position with a **Redis-backed lock** (`guardian:rescue-lock:{chain}:{wallet}`,
+`SET NX PX` with an owner-checked Lua release, 120s TTL): the Telegram approval path and the
+autonomous `/auto` path both acquire it before executing, so a double-tap or a concurrent watch
+tick can never broadcast two rescues against the same wallet. Lock semantics are gated in
+[scripts/test-rescue-lock.ts](../scripts/test-rescue-lock.ts) and status classification in
+[scripts/test-watcher-state.ts](../scripts/test-watcher-state.ts).
 
 ## Multi-asset sizing (how much to repay / supply)
 
@@ -219,12 +242,14 @@ that's what this Sepolia deployment allows (stables are supply-capped / have no 
 TEARDOWN F5). A single-asset position is the *cleanest* demo, not a compromise: the price cancels
 out of the health factor, so the rescue amount is exact token arithmetic with no oracle.
 
-The demo loop (see [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md)):
+The demo loop:
 `npm run setup-position` opens a fresh at-risk position (borrows up to ~97% of capacity, HF just
-above 1.0) → `npm run guardian` reads it, the decision layer (any OpenAI-compatible provider,
-configured via `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`)
-picks repay vs. supply, KeeperHub simulates first, then broadcasts and confirms. The real rescue tx
-is independently verifiable via RPC `eth_getLogs` on the Aave Pool's `Repay` event (TEARDOWN F9).
+above 1.0) → `LLM_TIMEOUT_MS=60000 npm run kh -- rescue --transport mcp --json` reads it, the
+decision layer (any OpenAI-compatible provider, configured via `LLM_API_KEY`/`LLM_BASE_URL`/
+`LLM_MODEL`) picks repay vs. supply, REST performs the no-broadcast simulation preflight, KeeperHub's
+hosted MCP broadcasts and settles, and the verifier re-reads the receipt + Aave `Repay`/`Supply`
+event from a public RPC before reporting success (`npm run verify-demo` reproduces it for any tx —
+the productized form of TEARDOWN F9).
 
 ## Resolved earlier open questions
 

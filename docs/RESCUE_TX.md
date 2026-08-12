@@ -87,6 +87,15 @@ A fresh at-risk position was rescued after the LLM dry-run selected the repay le
 
 The no-broadcast preflight used the existing REST execution client because KeeperHub's hosted MCP protocol-action tool did not provide a reliable simulation envelope for this Aave action. MCP handled the real broadcast and execution status. The CLI run ID was `4ea0e985-c653-4eb1-b23a-0c104334b833`.
 
+Independent verification now reproduces the receipt and event proof:
+
+```bash
+npm run verify-demo -- --tx 0x3b056fd69281dfdc4413094684983604046b66902f77cfe88e8d5da960aa88b9 \
+  --action repay --asset LINK --amount 257821958645241734690
+```
+
+The verifier confirmed receipt status `1`, block `11475458`, gas used `206425`, gas cost `211800929990650` wei, and an exact Aave `Repay` event match.
+
 ## Reproduce
 
 ```bash
