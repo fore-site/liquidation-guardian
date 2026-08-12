@@ -71,10 +71,26 @@ model-produced number for the amount.
 > path (a hosted OpenAI-compatible model choosing repay vs. supply and explaining it) is wired and
 > ready; it needs a fresh at-risk position to demo, since HF is now healthy at 1.5027.
 
+## Fresh LLM + MCP rescue — 2026-08-12
+
+A fresh at-risk position was rescued after the LLM dry-run selected the repay lever and the REST simulation preflight passed. The real broadcast used KeeperHub's hosted MCP `execute_protocol_action` tool.
+
+- **Trigger HF:** 1.0842
+- **LLM decision:** repay 257.82195864524175 LINK
+- **Decision reasoning:** Repaying LINK debt directly reduces the debt balance and improves the health factor most efficiently; the supply lever was unavailable because its required amount exceeded the Pool allowance.
+- **MCP execution ID:** `40747p27jahy0w0zui1a4`
+- **Rescue transaction:** `0x3b056fd69281dfdc4413094684983604046b66902f77cfe88e8d5da960aa88b9`
+- **Explorer:** https://sepolia.etherscan.io/tx/0x3b056fd69281dfdc4413094684983604046b66902f77cfe88e8d5da960aa88b9
+- **Receipt:** verified success at block `11475458`
+- **Result HF:** 1.0842 → 1.5029
+- **Gas:** 206,425 units; sponsored
+
+The no-broadcast preflight used the existing REST execution client because KeeperHub's hosted MCP protocol-action tool did not provide a reliable simulation envelope for this Aave action. MCP handled the real broadcast and execution status. The CLI run ID was `4ea0e985-c653-4eb1-b23a-0c104334b833`.
+
 ## Reproduce
 
 ```bash
-npm run setup-position   # open a fresh at-risk LINK/LINK position (HF just above 1.0)
-npm run read-position    # watch HF fall below threshold
-npm run guardian         # the Guardian rescues it (simulate → execute → confirm)
+npm run setup-position
+LLM_TIMEOUT_MS=60000 npm run kh -- rescue --dry-run --transport mcp --json
+LLM_TIMEOUT_MS=60000 npm run kh -- rescue --transport mcp --json
 ```

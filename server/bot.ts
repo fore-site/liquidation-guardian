@@ -31,6 +31,8 @@ import {
   type RescueCandidate,
 } from "../src/agent/decide.js";
 import type { GuardianRecord, GuardianStore } from "./store.js";
+import { RedisAuditSink } from "./audit.js";
+import { newAuditRunId } from "../src/audit.js";
 import { TelegramClient, type InlineKeyboard, type TelegramUpdate } from "./telegram.js";
 
 /** Don't re-alert the same at-risk position more often than this. */
@@ -357,6 +359,7 @@ export class GuardianBot {
         user: record.wallet,
         decision,
         position: pos,
+        audit: { sink: new RedisAuditSink(this.store, record.wallet), runId: newAuditRunId(), source: "telegram", threshold: record.hfThreshold, target: record.hfTarget },
       });
       await this.store.markAlerted(record.id);
       await this.tg.editMessageText(chatId, messageId, this.renderResult(result, chosen)).catch(() => undefined);
@@ -443,6 +446,7 @@ export class GuardianBot {
           hfThreshold: record.hfThreshold,
           hfTarget: record.hfTarget,
           maxSteps: 3, // the agent loops until safe or 3 steps spent
+          audit: { sink: new RedisAuditSink(this.store, record.wallet), runId: newAuditRunId(), source: "telegram", threshold: record.hfThreshold, target: record.hfTarget },
         });
       } catch (err) {
         // Rescue failed — do NOT mark alerted, so the next tick retries; and tell

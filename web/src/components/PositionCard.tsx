@@ -1,72 +1,8 @@
 import type { Asset, Status } from "../api.js";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js";
 
-/** Collateral and debt breakdown — the two sides of the position, in USD and per-asset. */
-export function PositionCard({ status }: { status: Status }) {
-  const { totalCollateralUsd, totalDebtUsd, availableBorrowsUsd, liquidationThreshold } = status;
-
-  return (
-    <Card className="bg-card">
-      <CardHeader>
-        <CardTitle>Position</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
-          <Total label="Collateral" value={usd(totalCollateralUsd)} tone="text-healthy" />
-          <Total label="Debt" value={usd(totalDebtUsd)} tone="text-risk" />
-          <Total label="Borrowable" value={usd(availableBorrowsUsd)} tone="text-muted-foreground" />
-        </div>
-
-        <div className="flex justify-between border-t border-border pt-3 text-sm text-muted-foreground">
-          <span>Liquidation threshold</span>
-          <span className="font-mono font-semibold text-foreground">{(liquidationThreshold * 100).toFixed(1)}%</span>
-        </div>
-
-        <AssetList title="Collateral" assets={status.collaterals} empty="No collateral supplied" />
-        <AssetList title="Debt" assets={status.debts} empty="No outstanding debt" />
-      </CardContent>
-    </Card>
-  );
-}
-
-function AssetList({ title, assets, empty }: { title: string; assets: Asset[]; empty: string }) {
-  return (
-    <div>
-      <p className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">{title}</p>
-      {assets.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{empty}</p>
-      ) : (
-        <ul className="divide-y divide-border">
-          {assets.map((a) => (
-            <li key={a.address} className="flex justify-between py-1.5 text-sm">
-              <span className="font-semibold">{a.symbol}</span>
-              <span className="font-mono tabular-nums">
-                {fmt(a.tokensHuman)}
-                {a.priceUsd != null && (
-                  <span className="text-muted-foreground"> · {usd(a.tokensHuman * a.priceUsd)}</span>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function Total({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return (
-    <div className="rounded-lg bg-secondary/40 p-3">
-      <span className={`block font-mono text-lg font-semibold tabular-nums ${tone}`}>{value}</span>
-      <span className="block text-xs text-muted-foreground">{label}</span>
-    </div>
-  );
-}
-
-function usd(n: number): string {
-  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmt(n: number): string {
-  return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
-}
+export function PositionCard({ status }: { status: Status }) { return <Card><CardHeader><p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">Position</p><CardTitle>What is backing the debt</CardTitle></CardHeader><CardContent className="space-y-6"><div className="grid grid-cols-3 gap-px border border-border bg-border"><Total label="Collateral" value={usd(status.totalCollateralUsd)} tone="text-healthy" /><Total label="Debt" value={usd(status.totalDebtUsd)} tone="text-risk" /><Total label="Borrowable" value={usd(status.availableBorrowsUsd)} tone="text-foreground" /></div><div className="flex items-center justify-between border-y border-border py-3 text-sm"><span className="text-muted-foreground">Liquidation threshold</span><span className="font-mono">{(status.liquidationThreshold * 100).toFixed(1)}%</span></div><AssetList title="Collateral" assets={status.collaterals} empty="No collateral supplied" /><AssetList title="Debt" assets={status.debts} empty="No outstanding debt" /></CardContent></Card>; }
+function AssetList({ title, assets, empty }: { title: string; assets: Asset[]; empty: string }) { return <div><p className="mb-3 text-xs uppercase tracking-[0.15em] text-muted-foreground">{title}</p>{assets.length === 0 ? <p className="text-sm text-muted-foreground">{empty}</p> : <ul className="divide-y divide-border">{assets.map((asset) => <li key={asset.address} className="flex items-center justify-between gap-3 py-3 text-sm"><span className="font-medium">{asset.symbol}</span><span className="font-mono tabular-nums">{fmt(asset.tokensHuman)}{asset.priceUsd != null && <span className="text-muted-foreground"> · {usd(asset.tokensHuman * asset.priceUsd)}</span>}</span></li>)}</ul>}</div>; }
+function Total({ label, value, tone }: { label: string; value: string; tone: string }) { return <div className="bg-card p-3"><span className={`block font-mono text-base tabular-nums ${tone}`}>{value}</span><span className="mt-1 block text-xs text-muted-foreground">{label}</span></div>; }
+function usd(value: number) { return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function fmt(value: number) { return value.toLocaleString(undefined, { maximumFractionDigits: 6 }); }

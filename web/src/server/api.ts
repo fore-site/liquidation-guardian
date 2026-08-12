@@ -347,6 +347,18 @@ export const getStatusFn = createServerFn({ method: "GET" })
 
 // ── GET /api/rescues ──────────────────────────────────────────────────────────
 
+export const getAuditFn = createServerFn({ method: "GET" })
+  .middleware([sessionMiddleware])
+  .handler(async ({ context }) => {
+    const { getContext, ensureBooted } = await server();
+    await ensureBooted();
+    const { store } = getContext();
+    const sid = (context as unknown as { sid?: string | null }).sid ?? null;
+    const record = sid ? await store.getById(sid) : null;
+    if (!record) return new Response(JSON.stringify({ error: "Not connected." }), { status: 401, headers: { "Content-Type": "application/json" } });
+    return store.getAudit(record.wallet);
+  });
+
 export const getRescuesFn = createServerFn({ method: "GET" })
   .middleware([sessionMiddleware])
   .handler(async ({ context }) => {

@@ -83,6 +83,7 @@ export interface Credentials {
 import {
   closeSessionFn,
   getHfHistoryFn,
+  getAuditFn,
   getRescuesFn,
   getSessionFn,
   getStatusFn,
@@ -150,6 +151,30 @@ export const resumeSession = (input: { wallet: string; chainId?: string; initDat
 export const getStatus = () => getStatusFn().then((r) => unwrap<Status>(r));
 
 export const getRescues = () => getRescuesFn().then((r) => unwrap<Rescue[]>(r));
+
+export interface AuditEvent {
+  runId: string;
+  phase: string;
+  source: string;
+  at: string;
+  chainId: string;
+  wallet: string;
+  transport?: string;
+  healthFactorBefore?: number;
+  healthFactorAfter?: number;
+  provider?: string;
+  action?: string;
+  asset?: string;
+  amountHuman?: number;
+  status?: string;
+  success?: boolean;
+  executionId?: string;
+  transactionHash?: string;
+  transactionLink?: string;
+  error?: string;
+}
+
+export const getAudit = () => getAuditFn().then((r) => unwrap<AuditEvent[]>(r));
 
 /** Recent HF readings for the dashboard chart, oldest-first. */
 export interface HfPoint {

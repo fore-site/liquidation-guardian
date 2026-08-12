@@ -56,6 +56,10 @@ export interface GuardianConfig {
   redisUrl: string;
   /** How often the bot's watch loop re-reads every stored position, ms. */
   watchIntervalMs: number;
+  /** KeeperHub execution transport. REST remains the default compatibility path. */
+  executionTransport: "rest" | "mcp";
+  /** Hosted KeeperHub MCP endpoint. */
+  keeperHubMcpUrl: string;
 }
 
 export function loadConfig(opts: { requireLlm?: boolean } = {}): GuardianConfig {
@@ -85,6 +89,8 @@ export function loadConfig(opts: { requireLlm?: boolean } = {}): GuardianConfig 
     guardianMasterKey: optional("GUARDIAN_MASTER_KEY", ""),
     redisUrl: optional("REDIS_URL", "redis://localhost:6379"),
     watchIntervalMs: Number(optional("WATCH_INTERVAL_MS", "60000")),
+    executionTransport: optional("EXECUTION_TRANSPORT", "rest") === "mcp" ? "mcp" : "rest",
+    keeperHubMcpUrl: optional("KEEPERHUB_MCP_URL", "https://app.keeperhub.com/mcp"),
   };
 }
 

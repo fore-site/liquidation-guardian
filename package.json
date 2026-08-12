@@ -9,7 +9,11 @@
     "setup-position": "tsx scripts/setup-position.ts",
     "guardian": "tsx src/agent/guardian.ts",
     "probe:llm": "tsx scripts/probe-llm.ts",
+    "mcp-probe": "tsx scripts/mcp-probe.ts",
+    "kh": "tsx scripts/cli.ts",
     "test-sizing": "tsx scripts/test-sizing.ts",
+    "test-mcp": "tsx scripts/test-mcp.ts",
+    "test-audit": "tsx scripts/test-audit.ts",
     "test-security": "tsx scripts/test-security.ts",
     "dev:api": "npm --prefix web run dev",
     "dev:web": "npm --prefix web run dev",
@@ -24,6 +28,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
     "dotenv": "^17.0.0",
     "openai": "^4.104.0",
     "rate-limiter-flexible": "^11.2.0",

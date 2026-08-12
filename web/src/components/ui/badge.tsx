@@ -1,25 +1,6 @@
 import * as React from "react";
 import { cn } from "~/lib/utils";
 
-const Badge = React.forwardRef<
-  HTMLSpanElement,
-  React.HTMLAttributes<HTMLSpanElement> & { variant?: "default" | "secondary" | "outline" | "success" | "warning" | "danger" }
->(({ className, variant = "default", ...props }, ref) => (
-  <span
-    ref={ref}
-    className={cn(
-      "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-wider transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-      variant === "default" && "bg-primary/15 text-accent border border-primary/20",
-      variant === "secondary" && "bg-secondary text-secondary-foreground border border-border",
-      variant === "outline" && "border border-border text-foreground bg-transparent hover:bg-secondary",
-      variant === "success" && "bg-healthy/15 text-healthy border border-healthy/20",
-      variant === "warning" && "bg-watch/15 text-watch border border-watch/20",
-      variant === "danger" && "bg-risk/15 text-risk border border-risk/20",
-      className,
-    )}
-    {...props}
-  />
-));
+const Badge = React.forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement> & { variant?: "default" | "secondary" | "outline" | "success" | "warning" | "danger" }>(({ className, variant = "default", ...props }, ref) => <span ref={ref} className={cn("inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-medium uppercase tracking-wider", variant === "default" && "border-primary/40 bg-primary/10 text-accent", variant === "secondary" && "border-border bg-secondary text-muted-foreground", variant === "outline" && "border-border text-foreground", variant === "success" && "border-healthy/40 bg-healthy/10 text-healthy", variant === "warning" && "border-watch/40 bg-watch/10 text-watch", variant === "danger" && "border-risk/40 bg-risk/10 text-risk", className)} {...props} />);
 Badge.displayName = "Badge";
-
 export { Badge };

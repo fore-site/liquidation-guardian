@@ -15,6 +15,8 @@
  */
 import { KeeperHub, type AavePosition } from "../keeperhub.js";
 import { createLogger } from "../log.js";
+import type { ExecutionTransport } from "../execution-transport.js";
+import type { AuditSink, AuditSource } from "../audit.js";
 import {
   decideRescueWithLlm,
   decideRescueDeterministic,
@@ -68,6 +70,9 @@ export async function runAgenticRescue(opts: {
   budgetMs?: number;
   /** When true, every step stops after a clean simulation — nothing broadcasts. */
   dryRun?: boolean;
+  /** Optional execution transport. Omitted for the default REST path. */
+  transport?: ExecutionTransport;
+  audit?: { sink: AuditSink; runId: string; source: AuditSource; threshold?: number; target?: number };
 }): Promise<AgentRunResult> {
   const {
     keeperHub,
@@ -79,6 +84,8 @@ export async function runAgenticRescue(opts: {
     maxSteps = 3,
     budgetMs = 120_000,
     dryRun = false,
+    transport,
+    audit,
   } = opts;
 
   const steps: AgentStep[] = [];
@@ -163,6 +170,8 @@ export async function runAgenticRescue(opts: {
       decision,
       dryRun,
       position,
+      transport,
+      audit,
     });
     const hfAfter = result.position.healthFactor;
     steps.push({

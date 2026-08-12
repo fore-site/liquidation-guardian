@@ -39,8 +39,8 @@ export function HfHistoryChart() {
               <AreaChart data={points} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
                 <defs>
                   <linearGradient id="hfFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#7c5cfc" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#7c5cfc" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#FF3B0E" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#FF3B0E" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="#272727" strokeDasharray="3 3" vertical={false} />
@@ -62,7 +62,7 @@ export function HfHistoryChart() {
                   }}
                   labelStyle={{ color: "#8a8a93" }}
                 />
-                <Area type="monotone" dataKey="hf" stroke="#7c5cfc" strokeWidth={2} fill="url(#hfFill)" />
+                <Area type="monotone" dataKey="hf" stroke="#FF3B0E" strokeWidth={2} fill="url(#hfFill)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>

@@ -26,6 +26,7 @@ import {
 } from "node:crypto";
 import { createClient, type RedisClientType } from "redis";
 import { KeeperHub } from "../src/keeperhub.js";
+import type { AuditEvent } from "../src/audit.js";
 
 /** AES-256-GCM ciphertext blob, all hex. */
 export interface EncryptedKey {
@@ -84,6 +85,7 @@ const WATCHER_CURSOR = "guardian:watcher-cursor";
 const DIRTY = (id: string) => `guardian:dirty:${id}`;
 const LINK_CODE = (code: string) => `guardian:link:${code.toLowerCase()}`;
 const HF_SNAPSHOTS = (id: string) => `guardian:hf:${id}`;
+const AUDIT = (wallet: string) => `guardian:audit:${wallet.toLowerCase()}`;
 /** Cap on stored decoded rescues per wallet (oldest dropped). */
 const MAX_RESCUES = 100;
 /** Cap on stored HF snapshots per record (oldest dropped). */
@@ -429,6 +431,20 @@ export class GuardianStore {
       }
     }
     return out.reverse(); // oldest-first
+  }
+
+  async appendAudit(wallet: string, event: AuditEvent): Promise<void> {
+    await this.redis.lPush(AUDIT(wallet), JSON.stringify(event)).catch(() => undefined);
+    await this.redis.lTrim(AUDIT(wallet), 0, 199).catch(() => undefined);
+  }
+
+  async getAudit(wallet: string): Promise<AuditEvent[]> {
+    const raw = await this.redis.lRange(AUDIT(wallet), 0, 199).catch(() => []);
+    const out: AuditEvent[] = [];
+    for (const item of raw) {
+      try { out.push(JSON.parse(item) as AuditEvent); } catch { /* skip corrupt entries */ }
+    }
+    return out;
   }
 
   /**

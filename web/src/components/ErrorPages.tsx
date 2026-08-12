@@ -1,53 +1,6 @@
+import { BrandMark } from "./BrandMark.js";
 import { Button } from "./ui/button.js";
 
-/** Styled 404 — rendered by the root route's `notFoundComponent`. */
-export function NotFoundPage() {
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 text-center text-foreground">
-      <span className="font-mono text-7xl font-semibold tracking-tight text-accent">404</span>
-      <h1 className="mt-4 text-2xl font-semibold">Page not found</h1>
-      <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-        The page you're looking for doesn't exist or was moved.
-      </p>
-      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-        <Button variant="outline" asChild>
-          <a href="/">← Back to home</a>
-        </Button>
-        <Button asChild>
-          <a href="/dashboard">Go to dashboard</a>
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/** Styled 500 — rendered by the root route's `errorComponent`. */
-export function ErrorPage({
-  error,
-  onReset,
-}: {
-  error?: unknown;
-  onReset?: () => void;
-}) {
-  const message = error instanceof Error && error.message ? error.message : undefined;
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 text-center text-foreground">
-      <span className="font-mono text-7xl font-semibold tracking-tight text-destructive">500</span>
-      <h1 className="mt-4 text-2xl font-semibold">Something went wrong</h1>
-      <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-        An unexpected error occurred. Your position is still being watched — try again.
-      </p>
-      {message && (
-        <p className="mt-2 max-w-full truncate font-mono text-xs text-muted-foreground/70" title={message}>
-          {message}
-        </p>
-      )}
-      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-        <Button variant="outline" asChild>
-          <a href="/">← Back to home</a>
-        </Button>
-        <Button onClick={onReset ?? (() => window.location.reload())}>Try again</Button>
-      </div>
-    </div>
-  );
-}
+export function NotFoundPage() { return <ErrorShell code="404" title="Page not found" message="This route does not exist. The watcher is still here when you are ready." action={<Button asChild><a href="/">Back to home</a></Button>} />; }
+export function ErrorPage({ error, onReset }: { error?: unknown; onReset?: () => void }) { const message = error instanceof Error && error.message ? error.message : undefined; return <ErrorShell code="500" title="Something went wrong" message="The page could not load. Try again, or return to the home page." detail={message} action={<Button onClick={onReset ?? (() => window.location.reload())}>Try again</Button>} />; }
+function ErrorShell({ code, title, message, detail, action }: { code: string; title: string; message: string; detail?: string; action: React.ReactNode }) { return <div className="flex min-h-screen flex-col bg-background text-foreground"><header className="border-b border-border"><div className="container-frame flex h-16 items-center"><a href="/" aria-label="Liquidation Guardian home"><BrandMark /></a></div></header><main className="container-frame flex flex-1 items-center py-16"><div className="max-w-xl"><p className="font-mono text-8xl font-light tracking-[-0.08em] text-primary">{code}</p><h1 className="mt-6 text-5xl font-light tracking-[-0.05em]">{title}</h1><p className="mt-5 max-w-md text-base leading-relaxed text-muted-foreground">{message}</p>{detail && <p className="mt-4 max-w-md truncate font-mono text-xs text-muted-foreground/70" title={detail}>{detail}</p>}<div className="mt-8 flex gap-3">{action}<Button variant="outline" asChild><a href="/">Home</a></Button></div></div></main></div>; }

@@ -5,3 +5,4 @@ import { Landing } from "../components/Landing.js";
 export const Route = createFileRoute("/")({
   component: Landing,
 });
+

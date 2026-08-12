@@ -1,0 +1,7 @@
+import type { AuditEvent } from "../api.js";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js";
+
+export function AuditTimeline({ events, error, onRetry }: { events: AuditEvent[]; error?: boolean; onRetry: () => void }) {
+  const latest = events.slice(0, 8);
+  return <Card><CardHeader><p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">Execution record</p><CardTitle>Guardian audit trail</CardTitle></CardHeader><CardContent>{error ? <div className="flex justify-between gap-4 text-sm text-risk"><span>Audit history is unavailable.</span><button type="button" className="underline" onClick={onRetry}>Retry</button></div> : latest.length === 0 ? <p className="border border-dashed border-border p-6 text-sm text-muted-foreground">No Guardian execution recorded yet.</p> : <ol className="space-y-3">{latest.map((event, index) => <li key={`${event.runId}-${event.phase}-${event.at}-${index}`} className="flex flex-wrap items-center gap-3 border border-border bg-background p-3 text-sm"><span className="size-2 rounded-full bg-primary" /><span className="font-medium capitalize">{event.phase.replace("_", " ")}</span><span className="text-muted-foreground">{event.source}{event.transport ? ` · ${event.transport}` : ""}</span>{event.provider && <span className="font-mono text-xs text-accent">{event.provider}</span>}{event.transactionLink && <a href={event.transactionLink} target="_blank" rel="noreferrer" className="ml-auto font-mono text-xs text-primary hover:underline">Transaction ↗</a>}</li>)}</ol>}</CardContent></Card>;
+}

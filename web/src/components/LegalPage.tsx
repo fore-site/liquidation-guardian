@@ -1,37 +1,6 @@
-import { Button } from "./ui/button.js";
+import { BrandMark } from "./BrandMark.js";
+import { SiteFooter } from "./PageShell.js";
 
-/** Minimal legal page — centered prose, consistent with the dark theme. */
 export function LegalPage({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="min-h-screen bg-background text-foreground">
-      <nav className="border-b border-border">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <a href="/" className="text-sm font-semibold tracking-tight">
-            Liquidation<span className="text-accent">Guardian</span>
-          </a>
-          <Button asChild variant="ghost" size="sm">
-            <a href="/">← Back to home</a>
-          </Button>
-        </div>
-      </nav>
-      <main className="mx-auto max-w-3xl px-6 py-12">
-        <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
-        <div className="mt-8 space-y-6 text-sm leading-relaxed text-muted-foreground">
-          {body
-            .trim()
-            .split("\n\n")
-            .map((block, i) => {
-              const isHeading = block.startsWith("## ");
-              return isHeading ? (
-                <h2 key={i} className="pt-2 text-lg font-semibold text-foreground">
-                  {block.replace(/^## /, "")}
-                </h2>
-              ) : (
-                <p key={i}>{block}</p>
-              );
-            })}
-        </div>
-      </main>
-    </div>
-  );
+  return <div className="min-h-screen bg-background text-foreground"><header className="border-b border-border"><div className="container-frame flex h-16 items-center justify-between"><a href="/" aria-label="Liquidation Guardian home"><BrandMark /></a><a href="/" className="text-sm text-muted-foreground hover:text-foreground">Back to home</a></div></header><main className="container-frame max-w-4xl py-16 lg:py-24"><p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">Product policy</p><h1 className="mt-5 text-5xl font-light tracking-[-0.05em] sm:text-6xl">{title}</h1><article className="mt-12 max-w-2xl space-y-6 border-t border-border pt-8 text-sm leading-relaxed text-muted-foreground">{body.trim().split("\n\n").map((block, index) => { const lines = block.split("\n"); if (block.startsWith("## ")) return <h2 key={index} className="pt-5 text-xl font-medium text-foreground">{block.replace(/^## /, "")}</h2>; if (lines.every((line) => line.trim().startsWith("- "))) return <ul key={index} className="list-disc space-y-2 pl-5">{lines.map((line) => <li key={line}>{line.replace(/^\s*-\s*/, "")}</li>)}</ul>; return <p key={index}>{block}</p>; })}</article></main><SiteFooter /></div>;
 }

@@ -19,6 +19,8 @@ import OpenAI from "openai";
 import { loadConfig } from "../config.js";
 import { KeeperHub, type AavePosition, type UserReserveData } from "../keeperhub.js";
 import { createLogger } from "../log.js";
+import { RestExecutionTransport, type ExecutionTransport } from "../execution-transport.js";
+import { safeAudit, type AuditSink, type AuditSource } from "../audit.js";
 import {
   type AssetPosition,
   type PositionSnapshot,
@@ -42,6 +44,7 @@ export interface GuardianResult {
   transactionHash?: string;
   transactionLink?: string;
   detail?: string;
+  provider?: "llm" | "deterministic";
 }
 
 /** LLM stack for the decision layer: an OpenAI-compatible client + timeout. */
@@ -76,6 +79,9 @@ export async function runGuardianOnce(opts: {
   dryRun?: boolean;
   /** Max rescue steps per run (default 1 — the old single-decision behavior). */
   maxSteps?: number;
+  /** Optional execution transport. Omitted for the default REST path. */
+  transport?: ExecutionTransport;
+  audit?: { sink: AuditSink; runId: string; source: AuditSource; threshold?: number; target?: number };
 }): Promise<GuardianResult> {
   const { keeperHub, llm, chainId, user, hfThreshold, hfTarget } = opts;
 
@@ -88,6 +94,8 @@ export async function runGuardianOnce(opts: {
     hfTarget,
     maxSteps: opts.maxSteps ?? 1,
     dryRun: opts.dryRun,
+    transport: opts.transport,
+    audit: opts.audit,
   });
   const last = run.steps[run.steps.length - 1];
 
@@ -101,6 +109,7 @@ export async function runGuardianOnce(opts: {
         status: "rescued",
         position: run.position,
         decision: last?.decision,
+        provider: last?.provider === "llm" ? "llm" : "deterministic",
         transactionHash: last?.transactionLink
           ? extractHash(last.transactionLink)
           : undefined,
@@ -128,6 +137,7 @@ export async function runGuardianOnce(opts: {
         status: "rescued",
         position: run.position,
         decision: last?.decision,
+        provider: last?.provider === "llm" ? "llm" : "deterministic",
         transactionHash: last?.transactionLink
           ? extractHash(last.transactionLink)
           : undefined,
@@ -166,8 +176,12 @@ export async function executeRescue(opts: {
   dryRun?: boolean;
   /** Pre-rescue position, if the caller already has it (avoids a redundant read on failure paths). */
   position?: AavePosition;
+  /** Optional alternate execution transport. Omitted callers use REST. */
+  transport?: ExecutionTransport;
+  audit?: { sink: AuditSink; runId: string; source: AuditSource; threshold?: number; target?: number; dryRun?: boolean };
 }): Promise<GuardianResult> {
   const { keeperHub, chainId, user, decision } = opts;
+  const transport = opts.transport ?? new RestExecutionTransport(keeperHub);
   const position = opts.position ?? (await keeperHub.readAavePosition(chainId, user));
 
   // 5. Build the Aave action body (amount is already token base units; asset address
@@ -192,24 +206,32 @@ export async function executeRescue(opts: {
 
   // 6. Simulate first — never broadcast a call we haven't preflighted.
   log(`Simulating ${actionType} (${decision.amountUnits} base units)…`);
-  const sim = await keeperHub.executeAction(actionType, body, { simulate: true });
-  if (!sim.success) {
-    log(`Simulation failed: ${sim.error}`);
-    return { status: "simulation_failed", position, decision, detail: sim.error };
+  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "simulation", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, dryRun: opts.dryRun, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), threshold: opts.audit?.threshold, target: opts.audit?.target });
+  const sim = await transport.simulateAction(actionType, body);
+  if (!sim.success || sim.wouldRevert) {
+    const detail = sim.error ?? "would revert";
+    log(`Simulation failed: ${detail}`);
+    await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "failed", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, dryRun: opts.dryRun, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: false, wouldRevert: sim.wouldRevert, error: detail });
+    return { status: "simulation_failed", position, decision, detail };
   }
   log("Simulation clean.");
+  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "simulation", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, dryRun: opts.dryRun, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, wouldRevert: false, gasEstimate: sim.gasEstimate });
 
   if (opts.dryRun) {
     return { status: "rescued", position, decision, detail: "dry-run: simulated only, not broadcast." };
   }
 
   // 7. Execute for real (fresh idempotency key inside executeAction).
-  log(`Broadcasting rescue via KeeperHub…`);
-  const exec = await keeperHub.executeAction(actionType, body);
+  log(`Broadcasting rescue via KeeperHub (${transport.name})…`);
+  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "broadcast", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString() });
+  const exec = await transport.executeAction(actionType, body);
   if (!exec.success) {
-    return { status: "simulation_failed", position, decision, detail: exec.error };
+    const detail = exec.error ?? "execution failed";
+    await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "failed", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: false, error: detail });
+    return { status: "simulation_failed", position, decision, detail };
   }
   log(`✅ Rescued. tx: ${exec.transactionLink ?? exec.transactionHash}`);
+  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "broadcast", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, status: exec.status, executionId: exec.executionId, transactionHash: exec.transactionHash, transactionLink: exec.transactionLink });
 
   // 8. Confirm the health factor actually recovered. The broadcast already
   //    succeeded — a failed confirm read must NOT turn a successful rescue into a
@@ -226,6 +248,7 @@ export async function executeRescue(opts: {
     });
   }
 
+  await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "confirmation", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, healthFactorAfter: after.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, status: "confirmed", executionId: exec.executionId, transactionHash: exec.transactionHash, transactionLink: exec.transactionLink, error: confirmNote || undefined });
   return {
     status: "rescued",
     position: after,
