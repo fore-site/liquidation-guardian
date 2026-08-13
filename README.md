@@ -284,6 +284,7 @@ npm run dev:api
 # Or run the production container with Redis
 docker compose up --build
 ```
+app is served on :3000 for npm run and on :8787 for docker.
 
 ## Quick start
 
