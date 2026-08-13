@@ -15,7 +15,7 @@ export interface McpToolResult {
 }
 
 function redact(value: unknown): string {
-  return String(value).replace(/kh_[A-Za-z0-9_-]+/g, "kh_[REDACTED]").replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]");
+  return String(value).replace(/kh_[A-Za-z0-9_\-+/=.]+/g, "kh_[REDACTED]").replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]");
 }
 
 function resultValue(result: McpToolResult): Record<string, unknown> {

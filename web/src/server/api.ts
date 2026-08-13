@@ -102,7 +102,12 @@ export const openSessionFn = createServerFn({ method: "POST" })
     const hfTarget = clampHf(Number(data.hfTarget ?? 2.0));
     const initData = typeof data.initData === "string" ? data.initData : "";
 
-    if (!/^kh_[A-Za-z0-9]+$/.test(keeperHubApiKey)) {
+    // Loose sanity check only — the authoritative gate is the authenticated probe
+    // below, which fails closed with a clear error. Keys are base64url today;
+    // this charset also tolerates standard base64 (+/=) and dotted tokens so a
+    // future key format can never be false-rejected here. Keep redaction
+    // (src/audit.ts, src/keeperhub-mcp.ts) a superset of THIS charset.
+    if (!/^kh_[A-Za-z0-9_\-+/=.]{8,}$/.test(keeperHubApiKey)) {
       return json(400, { error: "That doesn't look like a KeeperHub API key (kh_…)." });
     }
     if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {

@@ -40,8 +40,11 @@ export function auditEvent(input: Omit<AuditEvent, "at">): AuditEvent {
   return { ...input, at: new Date().toISOString(), reasoning: input.reasoning ? redact(input.reasoning) : undefined, error: input.error ? redact(input.error) : undefined };
 }
 
+// Superset of the onboarding validator (web/src/server/api.ts) — must catch
+// every plausible key encoding (base64url, standard base64, dotted tokens) so a
+// future key format can never leak into logs. Over-redaction here is harmless.
 function redact(value: string): string {
-  return value.replace(/kh_[A-Za-z0-9_-]+/g, "kh_[REDACTED]").replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]");
+  return value.replace(/kh_[A-Za-z0-9_\-+/=.]+/g, "kh_[REDACTED]").replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]");
 }
 
 export async function safeAudit(sink: AuditSink | undefined, event: Omit<AuditEvent, "at">): Promise<void> {
