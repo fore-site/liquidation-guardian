@@ -48,5 +48,8 @@
     "@types/node": "^24.13.3",
     "tsx": "^4.23.9",
     "typescript": "^5.9.3"
-  }
+  },
+  "workspaces": [
+    "web"
+  ]
 }
