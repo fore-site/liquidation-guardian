@@ -20,6 +20,8 @@ npm-debug.log*
 # TanStack Start / nitro build artifacts
 web/.nitro/
 web/.output/
+web/.vercel/
+.vercel/
 
 # Editor / OS
 .DS_Store

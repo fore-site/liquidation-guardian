@@ -17,6 +17,19 @@ export default defineConfig({
       srcDirectory: "src",
     }),
     viteReact(),
-    nitro(),
+    nitro({
+      // Vercel builds (VERCEL=1 is set by Vercel) emit the Build Output API
+      // layout at .vercel/output. Local + Docker builds keep the default
+      // node-server output at .output, which the Dockerfile and
+      // `npm --prefix web run start` expect.
+      ...(process.env.VERCEL
+        ? {
+            preset: "vercel" as const,
+            // Live position reads (RPC + KeeperHub) can run long on cold
+            // starts; the Hobby default maxDuration of 10s risks 504s.
+            vercel: { functions: { maxDuration: 60 } },
+          }
+        : {}),
+    }),
   ],
 });
