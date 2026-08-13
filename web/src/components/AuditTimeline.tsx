@@ -86,6 +86,10 @@ function toItems(events: AuditEvent[]): TimelineItem[] {
       }
       case "confirmation":
         return { key, label: "Confirmed onchain", tone: "success", meta, detail, link: event.transactionLink, time };
+      case "approval": {
+        const asset = event.asset?.toUpperCase();
+        return { key, label: event.success === true ? (asset ? `Approved ${asset} to Aave Pool` : "Approval confirmed") : "Approval", tone: event.success === true ? "success" : "neutral", meta, detail, link: event.transactionLink, time };
+      }
       case "failed": {
         const err = event.error ?? "";
         const status = String(event.status ?? "").toLowerCase();

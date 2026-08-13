@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 export type AuditSource = "cli" | "event-watcher" | "telegram" | "mcp" | "dashboard";
-export type AuditPhase = "trigger" | "decision" | "simulation" | "broadcast" | "confirmation" | "failed";
+export type AuditPhase = "trigger" | "decision" | "approval" | "simulation" | "broadcast" | "confirmation" | "failed";
 
 export interface AuditEvent {
   runId: string;

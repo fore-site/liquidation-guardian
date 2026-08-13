@@ -327,11 +327,14 @@ export function computeCandidates(
 /**
  * Executability gate for a sized lever: when the snapshot carries the wallet's
  * token balance and Pool allowance, the lever is only executable if the wallet
- * holds enough AND has allowed the Pool to pull it. Without that data (legacy
- * callers / tests), the lever is assumed executable — math-only sizing.
+ * holds enough of the token. Without that data (legacy callers / tests), the
+ * lever is assumed executable — math-only sizing.
  *
  * Aave pulls the token from the wallet for both repay and supply, so the same
- * balance + allowance check covers both actions.
+ * check covers both actions. A short Pool ALLOWANCE does NOT block a lever: the
+ * execution layer auto-approves (unlimited) before the rescue — see
+ * executeRescue in guardian.ts. It's surfaced as a note instead, so the decision
+ * layer never rejects a rescue the agent can recover from.
  */
 function executability(
   snap: PositionSnapshot,
@@ -340,23 +343,25 @@ function executability(
 ): { available: boolean; note?: string } {
   const symbol = asset.symbol.toUpperCase();
   const problems: string[] = [];
+  const notes: string[] = [];
 
   const balance = snap.walletBalances?.[symbol];
-  if (balance !== undefined) {
-    if (balance < units) {
-      problems.push(`wallet holds ${toHuman(balance, asset.decimals)} ${asset.symbol}, needs ${toHuman(units, asset.decimals)}`);
-    }
+  if (balance !== undefined && balance < units) {
+    problems.push(`wallet holds ${toHuman(balance, asset.decimals)} ${asset.symbol}, needs ${toHuman(units, asset.decimals)}`);
   }
   const allowance = snap.allowances?.[symbol];
-  if (allowance !== undefined) {
-    if (allowance < units) {
-      problems.push(`Pool allowance ${toHuman(allowance, asset.decimals)} ${asset.symbol}, needs ${toHuman(units, asset.decimals)}`);
-    }
+  if (allowance !== undefined && allowance < units) {
+    notes.push(`Pool allowance ${toHuman(allowance, asset.decimals)} ${asset.symbol} — will auto-approve before executing`);
   }
 
   return {
     available: problems.length === 0,
-    note: problems.length > 0 ? `unavailable: ${problems.join("; ")}` : undefined,
+    note:
+      problems.length > 0
+        ? `unavailable: ${problems.join("; ")}`
+        : notes.length > 0
+          ? notes.join("; ")
+          : undefined,
   };
 }
 

@@ -186,8 +186,8 @@ console.log("\nCase D — USDC+DAI debt, WETH collateral (multi-debt repay):");
   check("all 3 levers enumerated as available", avail === 3, `${avail}/3`);
 }
 
-// ── Case E: executability gate — wallet balance + Pool allowance ──────────────
-console.log("\nCase E — wallet balance + Pool allowance gate lever availability:");
+// ── Case E: executability gate — wallet balance blocks, allowance auto-approves ──
+console.log("\nCase E — wallet balance blocks a lever; a short allowance auto-approves:");
 {
   const hf = 1.1;
   const target = 1.5;
@@ -226,7 +226,9 @@ console.log("\nCase E — wallet balance + Pool allowance gate lever availabilit
   const starvedSupply = starvedCands.find((c) => c.action === "supply")!;
   check("supply also gated (needs ~33.3, holds 5) → unavailable", !starvedSupply.available, starvedSupply.note ?? "");
 
-  // 3. Enough balance but zero allowance → still unavailable.
+  // 3. Enough balance but zero allowance → STILL available: the execution layer
+  //    auto-approves (unlimited) before the rescue, so an allowance shortfall is
+  //    a recoverable note, not a dead lever.
   const noAllow: PositionSnapshot = {
     ...base,
     walletBalances: { LINK: units(1000, 18) },
@@ -235,12 +237,17 @@ console.log("\nCase E — wallet balance + Pool allowance gate lever availabilit
   const noAllowCands = computeCandidates(noAllow, target, 0);
   const noAllowRepay = noAllowCands.find((c) => c.action === "repay")!;
   check(
-    "allowance < amount → repay unavailable",
-    !noAllowRepay.available && /allowance/.test(noAllowRepay.note ?? ""),
+    "allowance < amount → repay still available (auto-approve)",
+    noAllowRepay.available && /auto-approve/.test(noAllowRepay.note ?? ""),
     noAllowRepay.note ?? "",
   );
+  const noAllowDec = decideRescueDeterministic(noAllow, target, 0);
+  check(
+    "deterministic picks repay when only allowance is short",
+    noAllowDec.action === "repay" && noAllowDec.asset === "LINK",
+  );
 
-  // 4. Balance AND allowance both cover → available again.
+  // 4. Balance AND allowance both cover → available, no note.
   const funded: PositionSnapshot = {
     ...base,
     walletBalances: { LINK: units(1000, 18) },

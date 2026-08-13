@@ -34,6 +34,8 @@ import { readPriceUsd } from "./prices.js";
 import { rpc } from "../../server/rescues.js";
 
 const logger = createLogger("guardian");
+/** uint256 max — the standard "unlimited" ERC-20 approval Aave's own UI grants. */
+const MAX_UINT256 = 2n ** 256n - 1n;
 /** Human-facing pass log (plain console lines for the CLI demo). */
 function log(msg: string): void {
   logger.info(msg);
@@ -209,6 +211,38 @@ export async function executeRescue(opts: {
           onBehalfOf: user,
           referralCode: "0",
         };
+
+  // 5.5 Aave pulls the token from the wallet (transferFrom) for both repay and
+  // supply. If the Pool's allowance is short, approve (unlimited) first — the
+  // same approval Aave's own UI grants by default — so the rescue can never fail
+  // with "ERC20: transfer amount exceeds allowance". Logged as its own audit
+  // step. The allowance read degrades to 0n on failure, which errs toward an
+  // (idempotent) extra approval broadcast rather than a failed rescue.
+  const allowance = await keeperHub.readErc20(chainId, decision.assetAddress, "allowance", user, SEPOLIA_POOL);
+  if (allowance < decision.amountUnits) {
+    log(`Allowance ${allowance} < ${decision.amountUnits} — approving ${decision.asset} to the Aave Pool (unlimited)…`);
+    await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "approval", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString() });
+    const approve = await transport.executeAction("contract-call", {
+      chainId,
+      contractAddress: decision.assetAddress,
+      functionName: "approve",
+      functionArgs: JSON.stringify([SEPOLIA_POOL, MAX_UINT256.toString()]),
+    });
+    if (!approve.success || !approve.executionId) {
+      const detail = approve.error ?? "allowance approval request failed";
+      await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "failed", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: false, error: `approve ${decision.asset}: ${detail}` });
+      return { status: "broadcast_failed", position, decision, detail: `Couldn't approve ${decision.asset} for the rescue: ${detail}` };
+    }
+    const approveSettlement = await transport.waitForExecution(approve.executionId);
+    const approveHash = txHashFrom(approveSettlement);
+    if (approveSettlement.status !== "confirmed") {
+      const detail = approveSettlement.error ?? "allowance approval did not confirm";
+      await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "failed", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: false, status: approveSettlement.status, executionId: approve.executionId, transactionHash: approveHash, transactionLink: approveSettlement.transactionLink ?? approve.transactionLink, error: `approve ${decision.asset}: ${detail}` });
+      return { status: approveSettlement.status === "reverted" ? "transaction_reverted" : "broadcast_failed", position, decision, executionId: approve.executionId, transactionHash: approveHash, transactionLink: approveSettlement.transactionLink ?? approve.transactionLink, settlement: approveSettlement.status, detail: `Allowance approval for ${decision.asset} failed: ${detail}` };
+    }
+    await safeAudit(opts.audit?.sink, { runId: opts.audit?.runId ?? "", phase: "approval", source: opts.audit?.source ?? "cli", chainId, wallet: user, transport: transport.name, healthFactorBefore: position.healthFactor, action: decision.action, asset: decision.asset, amountHuman: decision.amountHuman, amountUnits: decision.amountUnits.toString(), success: true, status: approveSettlement.status, executionId: approve.executionId, transactionHash: approveHash, transactionLink: approveSettlement.transactionLink ?? approve.transactionLink });
+    log(`✅ Approved ${decision.asset} to the Aave Pool.`);
+  }
 
   // 6. Simulate first — never broadcast a call we haven't preflighted.
   log(`Simulating ${actionType} (${decision.amountUnits} base units)…`);
