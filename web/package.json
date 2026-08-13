@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build && tsc --noEmit",
-    "preview": "vite preview",
+    "preview": "node .output/server/index.mjs",
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {

@@ -3,10 +3,5 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build:web",
   "outputDirectory": "web/.vercel/output",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/server"
-    }
-  ]
+  "framework": "tanstack-start"
 }
